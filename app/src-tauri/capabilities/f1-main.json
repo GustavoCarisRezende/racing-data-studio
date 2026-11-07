@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "f1-main",
+  "description": "Only the local main window may access the F1 commands.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-f1-sync",
+    "allow-f1-sync-status",
+    "allow-f1-local-seasons",
+    "allow-f1-season-details",
+    "allow-f1-remote-seasons",
+    "allow-f1-snapshots",
+    "allow-f1-restore-snapshot",
+    "allow-f1-copy-snapshot-events"
+  ]
+}

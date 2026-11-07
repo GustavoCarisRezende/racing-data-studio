@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="350" viewBox="0 0 1080 350" role="img" aria-label="Grafismo de velocidade diagonal vermelho e grafite, canto superior direito">
+
+<defs>
+  <linearGradient id="redSlash" x1="0" y1="0" x2="1" y2="0">
+    <stop stop-color="#D7263D" stop-opacity="0"/>
+    <stop offset=".46" stop-color="#D7263D" stop-opacity=".30"/>
+    <stop offset=".82" stop-color="#D7263D" stop-opacity=".87"/>
+    <stop offset="1" stop-color="#D7263D" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="greyFade" x1="0" y1="0" x2="0" y2="1">
+    <stop stop-color="#3B4557" stop-opacity=".25"/>
+    <stop offset="1" stop-color="#3B4557" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+<g fill="url(#greyFade)">
+ <path d="M330 10H520L382 255H172Z"/>
+ <path d="M505 10H650L522 255H382Z"/>
+ <path d="M668 10H780L644 255H522Z"/>
+ <path d="M811 10H955L825 255H667Z"/>
+ <path d="M970 10H1080V225H854Z"/>
+</g>
+<path d="M0 220 Q310 135 535 100 Q720 76 1010 18 L890 63 Q640 114 475 142 Q225 180 0 220Z" fill="url(#redSlash)"/>
+<path d="M70 248 Q380 163 580 137 Q754 113 1018 68" fill="none" stroke="#D7263D" stroke-width="2" opacity=".12"/>
+
+</svg>
