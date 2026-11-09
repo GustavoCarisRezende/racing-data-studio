@@ -1,7 +1,7 @@
 import type { CategoryModule } from '../types';
 import type { Locale, Translate } from '../../i18n/messages';
 import car from '../../assets/formula-car.svg';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Explore, type Details } from './explore';
 import { formatTimestamp } from './dates';
@@ -12,6 +12,7 @@ type Progress = { year: number; phase: string; offset: number };
 type Snapshot = { id: number; importedAt: string; dataAt: string };
 type View = 'sandbox' | 'explore' | 'sync' | 'snapshots' | 'source';
 const views: View[] = ['sandbox', 'explore', 'sync', 'snapshots', 'source'];
+const AnalysisScreen = lazy(() => import('./analysis-screen'));
 
 function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
   const desktop = isTauri();
@@ -107,14 +108,15 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
   }
   const phase = progress?.phase === 'races' ? t('phaseRaces') : progress?.phase === 'results' ? t('phaseResults') : progress?.phase === 'sprint' ? t('phaseSprint') : progress?.phase === 'saving' ? t('phaseSaving') : t('phaseStarting');
   return <section className="f1-screen">
-    <h1>{t('f1Heading')}</h1>
+    <h1>{view === 'sandbox' ? `${t('f1Heading')} · ${t('sandbox')}` : t('f1Heading')}</h1>
+    {view === 'sandbox' && <p className="f1-analysis-description">{t('sandboxIntro')}</p>}
     {!desktop && <p role="status">{t('desktopOnly')}</p>}
     {desktop && <>
       <div className="f1-tab-scroll"><div className="f1-nav" role="tablist" aria-label={t('f1Tabs')}>
         {views.map((item, index) => <button key={item} ref={(node) => { tabRefs.current[index] = node; }} id={`f1-tab-${item}`} type="button" role="tab" aria-selected={view === item} aria-controls="f1-tabpanel" tabIndex={view === item || (view === null && index === 0) ? 0 : -1} onKeyDown={(event) => navigateTabs(event, index)} onClick={() => selectTab(item)}>{t(item === 'sandbox' ? 'sandbox' : item === 'explore' ? 'explore' : item === 'sync' ? 'manageSync' : item === 'snapshots' ? 'manageSnapshots' : 'dataSource')}</button>)}
       </div></div>
       {view && <div id="f1-tabpanel" role="tabpanel" tabIndex={0} aria-labelledby={`f1-tab-${view}`}>
-      {view === 'sandbox' && <section><h2>{t('sandbox')}</h2><p>{t('sandboxPending')}</p></section>}
+      {view === 'sandbox' && <section className="f1-sandbox"><Suspense fallback={<p role="status">{t('loading')}</p>}><AnalysisScreen locale={locale} /></Suspense></section>}
       {view === 'source' && <section><h2>{t('dataSource')}</h2><p>{t('sourceNotice')}</p><p><a href="https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md" target="_blank" rel="noreferrer">{t('sourceTerms')}</a> · <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noreferrer">CC BY-NC-SA 4.0</a></p></section>}
       {view === 'sync' && <><p>{t('futureNotice')}</p>
       {catalogState === 'loading' && <p role="status">{t('catalog')}</p>}

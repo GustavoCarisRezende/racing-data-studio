@@ -141,3 +141,14 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .table-wrap tbody tr:focus-visible { outline:2px solid #ff9dae; outline-offset:-2px; }
 @media (max-width:950px) { .event-layout { grid-template-columns:1fr; height:auto; } .event-calendar { height:min(45vh, 340px); min-height:230px; } .event-preview { overflow:visible; } .event-preview .table-wrap { flex:none; max-height:min(50vh, 420px); } }
 @media (max-width:430px) { .event-calendar,.event-preview { padding:12px; } .event-card { gap:6px; padding:7px; } .event-date { font-size:11px; } }
+
+/* The data studio needs a wide canvas, without changing the other category screens. */
+.content:has(.f1-sandbox) { width:calc(100% - 64px); max-width:1800px; }
+.content:has(.f1-sandbox) .module-screen { padding-top:16px; }
+.f1-screen:has(.f1-sandbox) { max-width:none; }
+.f1-screen:has(.f1-sandbox)>h1 { margin:0 0 4px; font-size:24px; line-height:1.2; }
+.f1-analysis-description { margin:0 0 8px; font-size:13px; }
+.content:has(.f1-sandbox) .back { margin-bottom:8px; padding:4px 0; font-size:12px; }
+.f1-screen:has(.f1-sandbox) .f1-tab-scroll { margin:10px 0 14px; }
+.f1-screen:has(.f1-sandbox) .f1-nav button { font-size:13px; padding:8px 12px; }
+@media (max-width:760px) { .content:has(.f1-sandbox) { width:calc(100% - 24px); } .f1-screen:has(.f1-sandbox)>h1 { font-size:22px; } }

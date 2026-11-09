@@ -1,0 +1,22 @@
+{
+  "protocolVersion": 1,
+  "requestId": "fixture-query-1",
+  "datasetId": "orchard.harvest",
+  "schemaVersion": "1",
+  "semanticVersion": "1.0.0",
+  "selection": {
+    "protocolVersion": 1,
+    "datasetId": "orchard.harvest",
+    "token": "[\"2023\",\"2024\"]",
+    "revisions": [
+      { "partitionId": "2023", "revisionId": "fixture-1", "sourceDataAt": "2026-01-01T00:00:00Z", "storedAt": "2026-01-02T00:00:00Z" },
+      { "partitionId": "2024", "revisionId": "fixture-1", "sourceDataAt": "2026-01-01T00:00:00Z", "storedAt": "2026-01-02T00:00:00Z" }
+    ],
+    "transformationVersion": "orchard-fixture-1"
+  },
+  "dimensions": ["week"],
+  "metrics": [{ "metricId": "harvest", "aggregation": "sum" }],
+  "filters": [],
+  "orderBy": [{ "fieldId": "week", "direction": "asc" }],
+  "limit": 5000
+}

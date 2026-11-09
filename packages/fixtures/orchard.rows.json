@@ -1,0 +1,13 @@
+[
+  { "id": "m1", "week": 1, "campaign": "2023", "plot": "north", "plot_name": "North", "harvest_kg": "10.25" },
+  { "id": "m2", "week": 2, "campaign": "2023", "plot": "north", "plot_name": "North", "harvest_kg": "12.50" },
+  { "id": "m3", "week": 3, "campaign": "2023", "plot": "north", "plot_name": "North", "harvest_kg": "0.00" },
+  { "id": "m4", "week": 1, "campaign": "2023", "plot": "south", "plot_name": "South", "harvest_kg": "8.10" },
+  { "id": "m5", "week": 2, "campaign": "2023", "plot": "south", "plot_name": "South", "harvest_kg": null },
+  { "id": "m6", "week": 3, "campaign": "2023", "plot": "south", "plot_name": "South", "harvest_kg": "9.00" },
+  { "id": "m7", "week": 1, "campaign": "2024", "plot": "north", "plot_name": "North", "harvest_kg": "11.75" },
+  { "id": "m8", "week": 2, "campaign": "2024", "plot": "north", "plot_name": "North", "harvest_kg": "13.25" },
+  { "id": "m9", "week": 3, "campaign": "2024", "plot": "north", "plot_name": "North", "harvest_kg": "14.00" },
+  { "id": "m10", "week": 1, "campaign": "2024", "plot": "south", "plot_name": "South", "harvest_kg": "9.50" },
+  { "id": "m11", "week": 3, "campaign": "2024", "plot": "south", "plot_name": "South", "harvest_kg": "10.00" }
+]

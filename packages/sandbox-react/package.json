@@ -1,0 +1,15 @@
+{
+  "name": "@rds/sandbox-react",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./style.css": "./src/style.css"
+  },
+  "files": ["dist", "src/style.css"],
+  "sideEffects": ["**/*.css"],
+  "dependencies": { "@rds/sandbox-contracts": "0.1.0", "@rds/sandbox-core": "0.1.0" },
+  "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" }
+}

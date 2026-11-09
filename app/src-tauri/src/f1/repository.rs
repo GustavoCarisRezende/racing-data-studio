@@ -4,7 +4,7 @@ use std::{error::Error, fs, path::Path};
 use std::collections::BTreeMap;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub struct F1Repository {
     // Future F1 queries and transactional writes belong here, never in the shell.
@@ -59,6 +59,72 @@ impl F1Repository {
         let rows = stmt.query_map([], |r| Ok(serde_json::json!({"year": r.get::<_, i64>(0)?, "importedAt": r.get::<_, Option<String>>(1)?, "dataAt":r.get::<_, Option<String>>(2)?})))?.collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+
+    /// Freeze the latest snapshot of each local season in one SQLite read transaction.
+    /// This read-only projection is bounded before it crosses IPC.
+    pub fn analysis_snapshots(&mut self) -> Result<Vec<serde_json::Value>> {
+        self.analysis_snapshots_for(None)
+    }
+
+    pub fn analysis_snapshots_for(&mut self, revisions: Option<Vec<super::saved_analysis::Revision>>) -> Result<Vec<serde_json::Value>> {
+        let tx = self.connection.transaction()?;
+        let imports = if let Some(revisions) = revisions {
+            if revisions.is_empty() || revisions.len() > 151 { return Err("Invalid revisions".into()); }
+            let mut seen = std::collections::HashSet::new();
+            let mut imports = Vec::new();
+            super::saved_analysis::check_revisions(&tx, &revisions).map_err(|e| -> Box<dyn Error> { e.into() })?;
+            for r in revisions {
+                let year: u16 = r.partition_id.parse()?;
+                let id: i64 = r.revision_id.parse()?;
+                if !(1950..=2100).contains(&year) || year.to_string() != r.partition_id || id <= 0 || id.to_string() != r.revision_id || !seen.insert(year) { return Err("Invalid revision".into()); }
+                imports.push((id, year, r.stored_at, r.source_data_at.ok_or("Missing source timestamp")?));
+            }
+            imports
+        } else {
+            let mut stmt = tx.prepare("SELECT id, season_year, imported_at, COALESCE(source_imported_at, imported_at) FROM f1_imports i WHERE id = (SELECT MAX(id) FROM f1_imports WHERE season_year = i.season_year) ORDER BY season_year")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, u16>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if imports.len() > 151 { return Err("Too many seasons".into()); }
+        let mut total = 0usize;
+        let mut snapshots = Vec::new();
+        for (id, year, stored_at, source_at) in imports {
+            if id <= 0 || !(1950..=2100).contains(&year) { return Err("Invalid stored snapshot identity".into()); }
+            let mut pages = Vec::new();
+            {
+                let mut stmt = tx.prepare("SELECT endpoint, page_offset, payload FROM f1_import_pages WHERE import_id = ?1 ORDER BY endpoint, page_offset")?;
+                let mut rows = stmt.query([id])?;
+                while let Some(row) = rows.next()? {
+                    let name: String = row.get(0)?;
+                    let endpoint = match name.as_str() { "races" => "races", "results" => "results", "sprint" => "sprint", _ => return Err("Invalid endpoint".into()) };
+                    let payload: String = row.get(2)?;
+                    total = total.checked_add(payload.len()).ok_or("Snapshot size overflow")?;
+                    if total > 64 * 1024 * 1024 { return Err("Analysis snapshot size limit exceeded".into()); }
+                    pages.push(super::jolpica::Page { endpoint, offset: usize::try_from(row.get::<_, i64>(1)?)?, payload });
+                }
+            }
+            super::jolpica::validate_pages(year, &pages).map_err(|e| format!("Invalid analysis snapshot: {e}"))?;
+            let mut results = Vec::new();
+            for page in pages.iter().filter(|p| p.endpoint != "races") {
+                let root: serde_json::Value = serde_json::from_str(&page.payload)?;
+                let races = root.pointer("/MRData/RaceTable/Races").and_then(serde_json::Value::as_array).ok_or("Invalid results")?;
+                for race in races {
+                    let key = if page.endpoint == "results" { "Results" } else { "SprintResults" };
+                    for result in race.get(key).and_then(serde_json::Value::as_array).ok_or("Invalid results")? {
+                        results.push(serde_json::json!({"round": race["round"], "session": page.endpoint, "result": result}));
+                        if results.len() > 100_000 { return Err("Too many result occurrences".into()); }
+                    }
+                }
+            }
+            snapshots.push(serde_json::json!({"year": year, "id": id.to_string(), "storedAt": stored_at, "sourceDataAt": source_at, "results": results}));
+        }
+        tx.commit()?;
+        Ok(snapshots)
+    }
+
+    pub fn saved_list(&self) -> std::result::Result<Vec<serde_json::Value>, String> { super::saved_analysis::list(&self.connection) }
+    pub fn saved_load(&self, id: &str) -> std::result::Result<serde_json::Value, String> { super::saved_analysis::load(&self.connection, id) }
+    pub fn saved_save(&mut self, document: serde_json::Value, expected: Option<String>) -> std::result::Result<serde_json::Value, String> { super::saved_analysis::save(&mut self.connection, document, expected) }
 
     pub fn snapshots(&self, year: u16) -> Result<Vec<serde_json::Value>> {
         let mut stmt = self.connection.prepare("SELECT id, imported_at, COALESCE(source_imported_at, imported_at) FROM f1_imports WHERE season_year = ?1 ORDER BY id DESC")?;
@@ -179,6 +245,10 @@ fn migrate(connection: &mut Connection) -> Result<()> {
         tx.execute_batch(include_str!("migrations/003_restore_provenance.sql"))?;
         tx.pragma_update(None, "user_version", 3)?;
     }
+    if version < 4 {
+        tx.execute_batch(include_str!("migrations/004_saved_analyses.sql"))?;
+        tx.pragma_update(None, "user_version", 4)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -196,7 +266,7 @@ mod tests {
         migrate(&mut db).unwrap();
         migrate(&mut db).unwrap();
         assert_eq!(db.query_row("SELECT year FROM seasons", [], |r| r.get::<_, i64>(0)).unwrap(), 2024);
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 4);
     }
 
     #[test]
@@ -220,6 +290,22 @@ mod tests {
         assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
         let repo = F1Repository { connection: db };
         assert_eq!(repo.list().unwrap()[0]["dataAt"], "2024-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn version_three_to_four_keeps_original_snapshots() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("migrations/001_initial.sql")).unwrap();
+        db.execute_batch(include_str!("migrations/002_snapshots.sql")).unwrap();
+        db.execute_batch(include_str!("migrations/003_restore_provenance.sql")).unwrap();
+        db.pragma_update(None, "user_version", 3).unwrap();
+        db.execute("INSERT INTO seasons(year) VALUES (2024)", []).unwrap();
+        db.execute("INSERT INTO f1_imports(id, season_year, imported_at) VALUES (7, 2024, '2024-01-01T00:00:00Z')", []).unwrap();
+        db.execute("INSERT INTO f1_import_pages VALUES (7, 'races', 0, 'original')", []).unwrap();
+        migrate(&mut db).unwrap(); migrate(&mut db).unwrap();
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
+        assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_analyses", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]
@@ -301,6 +387,83 @@ mod tests {
         assert_eq!(details["results"].as_array().unwrap().len(), 2);
         assert_eq!(details["results"][0]["result"]["Driver"]["driverId"], "a");
         assert!(repo.details(2023).is_err());
+    }
+
+    #[test]
+    fn analysis_reads_latest_valid_snapshot_without_modifying_database() {
+        use super::super::jolpica::fixtures::season;
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        assert!(repo.analysis_snapshots().unwrap().is_empty());
+        repo.save(2024, &season(&[1], &["a", "a"])).unwrap();
+        let frozen = repo.analysis_snapshots().unwrap();
+        assert_eq!(frozen[0]["results"].as_array().unwrap().len(), 2);
+        repo.save(2024, &season(&[1, 2], &["a", "a", "b"])).unwrap();
+        let current = repo.analysis_snapshots().unwrap();
+        assert_ne!(frozen[0]["id"], current[0]["id"]);
+        assert_eq!(frozen[0]["results"].as_array().unwrap().len(), 2);
+        assert_eq!(repo.snapshots(2024).unwrap().len(), 2);
+        repo.connection.execute("UPDATE f1_import_pages SET payload = 'corrupt' WHERE import_id = (SELECT MAX(id) FROM f1_imports) AND endpoint = 'results'", []).unwrap();
+        assert!(repo.analysis_snapshots().is_err());
+    }
+
+    #[test]
+    fn saved_analysis_is_transactional_and_reopens_original_snapshot() {
+        use super::super::jolpica::fixtures::season;
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        repo.save(2024, &season(&[1], &["a", "a"])).unwrap();
+        let frozen = repo.analysis_snapshots().unwrap();
+        let reference = serde_json::json!({"partitionId":"2024", "revisionId":frozen[0]["id"], "sourceDataAt":frozen[0]["sourceDataAt"], "storedAt":frozen[0]["storedAt"]});
+        let doc = serde_json::json!({"documentVersion":1,"id":"analysis-1","revision":null,"title":"Synthetic", "datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1", "selection":{"protocolVersion":1,"datasetId":"f1.session_results","token":"opaque","transformationVersion":"f1-results-1","revisions":[reference]},"visualization":{"kind":"table","x":"season","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":null,"runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved = repo.saved_save(doc.clone(), None).unwrap();
+        let revision = saved["revision"].as_str().unwrap().to_string();
+        assert_eq!(repo.saved_save(doc.clone(), None).unwrap_err(), "CONFLICT");
+        assert_eq!(repo.saved_list().unwrap().len(), 1);
+        let mut malformed = saved.clone(); malformed["unknown"] = serde_json::json!(true);
+        assert_eq!(repo.saved_save(malformed, Some(revision.clone())).unwrap_err(), "INVALID_CONTRACT");
+        let mut wrong = saved.clone(); wrong["selection"]["revisions"][0]["revisionId"] = serde_json::json!("999999");
+        assert_eq!(repo.saved_save(wrong, Some(revision.clone())).unwrap_err(), "REVISION_MISSING");
+        let mut future = saved.clone(); future["documentVersion"] = serde_json::json!(2);
+        assert_eq!(repo.saved_save(future, Some(revision.clone())).unwrap_err(), "INVALID_CONTRACT");
+        let mut reversed = saved.clone(); reversed["filters"] = serde_json::json!([{"fieldId":"points_raw","op":"range","min":"2.1","max":"2.09"}]);
+        assert_eq!(repo.saved_save(reversed, Some(revision.clone())).unwrap_err(), "INVALID_CONTRACT");
+        let mut updated = saved.clone(); updated["title"] = serde_json::json!("Updated");
+        let next = repo.saved_save(updated, Some(revision.clone())).unwrap();
+        assert_ne!(next["revision"], saved["revision"]);
+        assert_eq!(repo.saved_save(saved, Some(revision)).unwrap_err(), "CONFLICT");
+        repo.save(2024, &season(&[1, 2], &["a", "a", "b"])).unwrap();
+        let reopened = repo.saved_load("analysis-1").unwrap();
+        let refs: Vec<super::super::saved_analysis::Revision> = serde_json::from_value(reopened["selection"]["revisions"].clone()).unwrap();
+        assert_eq!(repo.analysis_snapshots_for(Some(refs)).unwrap(), frozen);
+        assert_eq!(repo.snapshots(2024).unwrap().len(), 2);
+        repo.connection.execute("DELETE FROM f1_import_pages WHERE import_id = ?1", [frozen[0]["id"].as_str().unwrap().parse::<i64>().unwrap()]).unwrap();
+        let refs = serde_json::from_value(reopened["selection"]["revisions"].clone()).unwrap();
+        assert!(repo.analysis_snapshots_for(Some(refs)).is_err());
+    }
+
+    #[test]
+    fn saved_analysis_survives_reopen_and_conflicts_across_connections() {
+        use super::super::jolpica::fixtures::season;
+        let base = if std::path::Path::new("/tmp/opencode").is_dir() { std::path::PathBuf::from("/tmp/opencode") } else { std::env::temp_dir() };
+        let path = base.join(format!("rds-analysis-test-{}-{}.sqlite", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut db = Connection::open(&path).unwrap(); migrate(&mut db).unwrap();
+        let mut first = F1Repository { connection: db };
+        first.save(2024, &season(&[1], &["a"])).unwrap();
+        let snap = first.analysis_snapshots().unwrap();
+        let doc = serde_json::json!({"documentVersion":1,"id":"saved","revision":null,"title":"Synthetic", "datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1", "selection":{"protocolVersion":1,"datasetId":"f1.session_results","token":"token","transformationVersion":"f1-results-1","revisions":[{"partitionId":"2024","revisionId":snap[0]["id"],"sourceDataAt":snap[0]["sourceDataAt"],"storedAt":snap[0]["storedAt"]}]},"visualization":{"kind":"table","x":"season","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":null,"runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved = first.saved_save(doc, None).unwrap();
+        drop(first);
+        let mut db = Connection::open(&path).unwrap(); migrate(&mut db).unwrap();
+        let mut first = F1Repository { connection: db };
+        let mut db2 = Connection::open(&path).unwrap(); migrate(&mut db2).unwrap();
+        let mut second = F1Repository { connection: db2 };
+        let a = first.saved_load("saved").unwrap(); let b = second.saved_load("saved").unwrap();
+        assert_eq!(a, saved); let revision = a["revision"].as_str().unwrap().to_owned();
+        first.saved_save(a, Some(revision.clone())).unwrap();
+        assert_eq!(second.saved_save(b, Some(revision)).unwrap_err(), "CONFLICT");
+        drop(first); drop(second);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

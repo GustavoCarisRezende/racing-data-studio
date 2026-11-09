@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "requestId": "fixture-query-1",
+  "selectionToken": "[\"2023\",\"2024\"]",
+  "columns": [
+    { "id": "week", "label": { "fallback": "Week", "translations": { "pt-BR": "Semana" } }, "type": "integer" },
+    { "id": "harvest", "label": { "fallback": "Harvest", "translations": { "pt-BR": "Colheita" } }, "type": "decimal", "unit": "kg" }
+  ],
+  "rows": [
+    { "id": "[1]", "values": { "week": 1, "harvest": "39.60" } },
+    { "id": "[2]", "values": { "week": 2, "harvest": null } },
+    { "id": "[3]", "values": { "week": 3, "harvest": "33.00" } }
+  ],
+  "complete": true,
+  "totalRows": 3,
+  "warnings": []
+}

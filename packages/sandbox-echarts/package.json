@@ -1,0 +1,16 @@
+{
+  "name": "@rds/sandbox-echarts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "sideEffects": true,
+  "dependencies": {
+    "@rds/sandbox-core": "0.1.0",
+    "@rds/sandbox-contracts": "0.1.0",
+    "echarts": "6.1.0"
+  },
+  "peerDependencies": { "react": "^19.0.0" }
+}

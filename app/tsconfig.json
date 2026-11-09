@@ -8,7 +8,13 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "paths": {
+      "@rds/sandbox-contracts": ["../packages/sandbox-contracts/dist/index.d.ts"],
+      "@rds/sandbox-core": ["../packages/sandbox-core/dist/index.d.ts"],
+      "@rds/sandbox-react": ["../packages/sandbox-react/dist/index.d.ts"],
+      "@rds/sandbox-echarts": ["../packages/sandbox-echarts/dist/index.d.ts"]
+    },
+    "types": ["vite/client", "node"]
   },
   "include": ["src", "vite.config.ts"]
 }

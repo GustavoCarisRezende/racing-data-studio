@@ -1,0 +1,22 @@
+{
+  "protocolVersion": 1,
+  "id": "orchard.harvest",
+  "schemaVersion": "1",
+  "semanticVersion": "1.0.0",
+  "label": { "fallback": "Orchard harvest", "translations": { "pt-BR": "Colheita do pomar" } },
+  "description": { "fallback": "Synthetic offline fixture; not a production source.", "translations": { "pt-BR": "Fixture sintética offline; não é uma fonte de produção." } },
+  "grain": { "fallback": "One measurement occurrence per plot, campaign and week.", "translations": { "pt-BR": "Uma ocorrência de medição por talhão, campanha e semana." } },
+  "fields": [
+    { "id": "week", "label": { "fallback": "Week", "translations": { "pt-BR": "Semana" } }, "type": "integer", "role": "dimension", "analyticalType": "ordinal", "nullable": false, "ordered": true, "filters": ["range", "in"], "availability": "available" },
+    { "id": "campaign", "label": { "fallback": "Campaign", "translations": { "pt-BR": "Campanha" } }, "type": "string", "role": "dimension", "analyticalType": "nominal", "nullable": false, "ordered": false, "filters": ["in", "contains"], "availability": "available" },
+    { "id": "plot", "label": { "fallback": "Plot", "translations": { "pt-BR": "Talhão" } }, "type": "string", "role": "dimension", "analyticalType": "nominal", "nullable": false, "ordered": false, "filters": ["in", "contains"], "availability": "available", "labelField": "plot_name" },
+    { "id": "plot_name", "label": { "fallback": "Plot name", "translations": { "pt-BR": "Nome do talhão" } }, "type": "string", "role": "dimension", "analyticalType": "nominal", "nullable": false, "ordered": false, "filters": ["contains"], "availability": "available" },
+    { "id": "harvest_kg", "label": { "fallback": "Harvest (raw)", "translations": { "pt-BR": "Colheita (bruta)" } }, "type": "decimal", "role": "measure", "analyticalType": "quantitative", "nullable": true, "ordered": true, "filters": ["range", "isNull", "isNotNull"], "availability": "partial", "unit": "kg" }
+  ],
+  "metrics": [
+    { "id": "harvest", "label": { "fallback": "Harvest", "translations": { "pt-BR": "Colheita" } }, "description": { "fallback": "Reported kilograms; missing measurements propagate to totals. Campaign comparisons do not normalize weather or plot area.", "translations": { "pt-BR": "Quilos informados; medições ausentes propagam ausência aos totais. Comparações não normalizam clima ou área." } }, "fieldId": "harvest_kg", "unit": "kg", "aggregations": ["sum", "max"], "defaultAggregation": "sum", "groupableBy": ["week", "campaign", "plot", "plot_name"], "nullPolicy": "propagate", "additive": true, "supportsRunningSum": true }
+  ],
+  "sources": [{ "name": "RDS synthetic fixture", "attribution": "Racing Data Studio contributors; invented test data", "license": "Apache-2.0" }],
+  "limitations": [{ "fallback": "No inferred zeroes. Missing weeks remain gaps. Cumulative values become unknown after a missing measurement.", "translations": { "pt-BR": "Sem zeros inferidos. Semanas ausentes mantêm lacunas. O acumulado torna-se desconhecido após uma medição ausente." } }],
+  "capabilities": { "charts": ["table", "line", "bar"], "maxDimensions": 3, "maxRows": 5000, "maxSeries": 20, "comparisonDimensions": ["campaign"], "runningSum": true, "completeGroupedQueries": true }
+}

@@ -65,6 +65,39 @@ pub async fn f1_local_seasons(app: tauri::AppHandle) -> Result<Vec<Value>, Strin
 }
 
 #[tauri::command]
+pub async fn f1_analysis_snapshots(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|mut r| r.analysis_snapshots()).map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_analysis_pinned(app: tauri::AppHandle, revisions: Vec<super::saved_analysis::Revision>) -> Result<Vec<Value>, String> {
+    if revisions.is_empty() || revisions.len() > 151 { return Err("INVALID_CONTRACT".into()); }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|mut r| r.analysis_snapshots_for(Some(revisions))).map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_analyses_list(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.saved_list()).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_analysis_load(app: tauri::AppHandle, id: String) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.saved_load(&id)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_analysis_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.saved_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn f1_season_details(app: tauri::AppHandle, year: u16) -> Result<Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|r| r.details(year)).map_err(|e| e.to_string()))
