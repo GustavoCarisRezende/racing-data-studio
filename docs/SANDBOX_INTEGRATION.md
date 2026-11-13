@@ -1,5 +1,12 @@
 # Contrato de integração da sandbox — protocolo/documento v1
 
+> Extensões atuais (queries v2, modelos latest, pizza/dispersão, tabela e handoff
+> para Terra): [SANDBOX_V2_HANDOFF.md](SANDBOX_V2_HANDOFF.md). Este documento mantém
+> o contrato legado; análises fixas v1 não são convertidas em modelos.
+
+> Acumulado entre sessões com filtros múltiplos pós-cálculo: contrato opt-in
+> [SANDBOX_V3_ACCUMULATION.md](SANDBOX_V3_ACCUMULATION.md). Não muda a semântica v2.
+
 Biblioteca independente em [`packages/`](../packages/README.md), integrada pela
 camada `app/src/categories/f1/analysis-*`. A revisão visual de 08/11/2026 ajustou
 também a composição React e o adapter F1, sem modificar SQLite, migrations,

@@ -1,5 +1,99 @@
 # Registro de validação da sandbox
 
+## Revisão funcional/visual — 12/11/2026
+
+- `packages/npm test`: **39 testes aprovados**; `app/npm test`: **19 testes
+  aprovados** (58 no total), somente readers/invokes/records sintéticos.
+- Builds TypeScript dos pacotes e `app/npm run build`: aprovados. O build web
+  mantém aviso de chunk lazy grande (~694,13 kB minificado / 229,98 kB gzip).
+- `npm run size`: renderer **582385 bytes / 200646 gzip**; UI **100291 bytes /
+  30062 gzip**, React externo. Sem novas dependências, eval ou gráficos não solicitados.
+- Regressão com **adapter F1 e EChartsRenderer reais**, usando somente fixtures:
+  pizza SVG, modelos padrão/usuário na mesma gestão, v2/v3 intactos sem prompt,
+  troca de idioma/normalização, presets com baseline limpa e desvinculada, edição
+  real com confirmação/Cancelar, retorno à configuração original, foco de renomear,
+  título aparado, salvar e restaurar um padrão ausente sem sobrescrever os demais
+  nem perder um rascunho. Também testa Unicode/ordem/repetição nos filtros canônicos.
+- Preview sintético com modelos/calendários inventados em memória; nenhum IPC,
+  SQLite ou snapshot pessoal. Chromium conectado confirmou pizza com SVG real,
+  duas linhas, nenhum diálogo/aviso dirty e console sem erros. Captura Chromium
+  indisponível pela janela não visível; não foi alegada como screenshot.
+- Capturas reais Firefox headless, perfis temporários isolados, aguardando
+  SVG/tabela após ações do harness: desktop 1672×1100 (pizza), 1024×1800 (barras e
+  configuração abaixo) e móvel 390×3000 (pizza/configuração empilhadas).
+  Arquivos: `/tmp/opencode/sandbox-ui-20261112-pie.png`, `-cumulative.png`, `-mobile.png`.
+- Servidores de preview encerrados após a captura; confirmação TCP de porta 4179
+  livre. Nenhum servidor persistente deixado aberto. `git diff --check` aprovado.
+- Necessário tocar somente dois arquivos de host nesta rodada: `analysis-screen.tsx`
+  para injetar restauração na gestão unificada e `analysis-provider.ts` para rótulo
+  localizado da medida. Comparação com cópias prévias confirma nenhuma mudança do
+  algoritmo F1. Nenhuma edição em SQL, migrations, backend nativo ou dados reais.
+
+Handoff/diagnóstico: [`SANDBOX_UI_RECOVERY.md`](../docs/SANDBOX_UI_RECOVERY.md).
+Tauri/WebKitGTK, leitor de tela, IPC e dados históricos pessoais não foram validados.
+Versões/semânticas existentes e modelos persistidos não foram migrados ou apagados.
+Alterações preexistentes da integração preservadas; sem commit/push.
+
+## Desbloqueio do contrato de acumulados — query/modelo v3
+
+- Leitura do bloqueio em `docs/F1_SANDBOX_V2_STATUS.md`; alterações desta rodada
+  limitadas a `packages/` e documentação. Alterações preexistentes da integração
+  em `app/` foram preservadas, sem edição, reversão ou commit. Sem dados reais/SQLite.
+- `npm test`: **37 testes aprovados**, incluindo regressões v1/v2, seletor de
+  temporadas F1 adaptado às facetas atuais e cinco novos testes de contrato/UI v3.
+- `npm run build`/build TypeScript executado por test e size: aprovado.
+- `npm run size`: aprovado. Renderer **582385 bytes / 200646 gzip**; UI
+  **93354 bytes / 27952 gzip** (React externo, bundles minificados em memória).
+- `node scripts/visual-smoke.mjs --build-only`: bundle sintético aprovado;
+  cenário `?selected` adaptado para checkboxes de temporadas, sem iniciar servidor.
+  Não constitui nova verificação visual do layout.
+- `git diff --check`: sem erros de whitespace.
+- V3 testado com grão de quatro dimensões, partições independentes de campanha/
+  entidade, visitas ordenadas pelo provider (não pelo código lexical), agregação
+  de ocorrências antes da janela e dois filtros pós-cálculo simultâneos.
+- Confirmado que mostrar só visitas finais inclui visitas iniciais anteriores e
+  mostrar só iniciais inclui finais anteriores; não inclui posteriores. Nulos
+  anteriores continuam desconhecidos. Cronologia ausente **fora do recorte** ou
+  ambígua recusa o cálculo; UI informa o erro e não permite salvar sem resultado.
+- Modelos v1/v2 não recebem perfis/extras. Store/parser v2 rejeitam v3 em vez de
+  descartar os campos. Store v3 volátil testa leitura v2/v3, CAS e roundtrip latest.
+  UI testa bloqueio de gravação com store v2 e reabertura com store v3 opt-in.
+
+Handoff para Terra: [`SANDBOX_V3_ACCUMULATION.md`](../docs/SANDBOX_V3_ACCUMULATION.md).
+Ainda pendentes: perfil/cálculo/cronologia F1 real, suporte nativo ao modelo v3,
+backend/IPC, histórico incompleto real, Tauri/WebKitGTK e acessibilidade assistiva.
+
+## Extensão da biblioteca — 10/11/2026
+
+- Escopo desta extensão: somente `packages/` e documentação sandbox. Nenhuma edição
+  em `app/`, dependências do app, SQLite ou dados pessoais; nenhum commit realizado.
+- `npm test` em `packages/`: **32 testes aprovados**, incluindo os 26 anteriores
+  adaptados à configuração única à direita e seis novos testes de v2/UI.
+- `npm run build` (também executado por test/size): TypeScript aprovado.
+- `npm run size`: aprovado; bundles ESM minificados em memória com React externo:
+  renderer **582385 bytes / 200646 gzip**; UI **84025 bytes / 25430 gzip**.
+  Pizza/dispersão são agora módulos intencionais. Mantida verificação contra
+  `eval/new Function` e gráficos não solicitados. Não são tamanhos do instalador.
+- `git diff --check`: sem erros de whitespace.
+- SVGs **reais** de pizza/dispersão renderizados pelo ECharts em SSR, além de
+  testes de pares nulos, negativos, zeros, medidas incompatíveis e magnitude limite.
+- Golden JSON v1 e acumulado legado preservados; teste explícito de análise fixa
+  anterior à capacidade de multisseleção sem adição silenciosa de agrupamentos.
+- Query v2 testada com cálculo antes do recorte, partição por entidade/campanha,
+  ordem de exibição descendente sem inverter a janela e resposta na versão correta.
+- Store volátil CAS testado para criar/renomear/abrir/atualizar/excluir/conflito;
+  reader sintético atualizado demonstra modelo latest novo vs análise pinned antiga.
+- UI jsdom: três campanhas, busca real na faceta, ordenação por cabeçalho,
+  Alt+↑ nas colunas, visibilidade/ordem/sort persistidos ao reabrir, avisos dirty,
+  Cancelar/Confirmar locais, `beforeunload`, notificações ao host e conflitos CRUD.
+
+Nenhum teste usa dados de produção ou cria modelos fictícios no componente. Novas
+capturas de layout, desktop Tauri, IPC/store durável, WebKitGTK/CSP, leitor de tela,
+zoom e carga real do backend **não foram validados nesta extensão**. O renderer
+continua usando ResizeObserver com o teste de resize anterior aprovado. Terra deve
+implementar/habilitar os contratos F1/latest/model store conforme
+[`SANDBOX_V2_HANDOFF.md`](../docs/SANDBOX_V2_HANDOFF.md).
+
 ## Revisão de UI e integração — 08/11/2026
 
 - `packages/npm test`: **26 testes aprovados**, incluindo o adapter F1 real com

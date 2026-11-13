@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
+import { JSDOM } from 'jsdom';
+import { act, createElement } from 'react';
+import { Sandbox } from '@rds/sandbox-react';
+import { v2Fixture } from './v2-fixture.mjs';
+
+test('v2 studio: searchable multiselection, keyboard columns, persisted sorting, dirty dialogs, latest CRUD and conflicts', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://fixture.invalid' });
+  const old = new Map();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) { old.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value }); }
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(document.getElementById('root'));
+  const fixture = v2Fixture(), { provider, store } = fixture;
+  const dirtyEvents = [], selections = [], queries = [];
+  const originalResolve = provider.resolveSelection, originalQuery = provider.query;
+  provider.resolveSelection = async (...args) => { selections.push(args[0]); return originalResolve(...args); };
+  provider.query = async (...args) => { queries.push(args[0]); return originalQuery(...args); };
+  let chart;
+  const Renderer = ({ model }) => { chart = model; return createElement('div', { role: 'img', 'aria-label': model.description }); };
+  const host = { onDirtyChange: dirty => dirtyEvents.push(dirty) };
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
+  const button = text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, `button ${text}`); return b; };
+  const click = async text => { await act(async () => button(text).click()); await settle(); };
+  const choose = async (label, value) => { const s = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === label)?.querySelector('select'); assert.ok(s, label); await act(async () => { s.value = value; s.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle(); };
+  try {
+    await act(async () => root.render(createElement(Sandbox, { provider, store, host, ChartRenderer: Renderer }))); await settle();
+    assert.equal(document.querySelectorAll('.rds-sb-result select').length, 0);
+    assert.equal(document.querySelectorAll('.rds-sb-config .rds-sb-bindings').length, 1);
+    assert.ok(!document.querySelector('.rds-sb-models select'));
+    const campaign = [...document.querySelectorAll('.rds-sb-quick-filter')].find(d => d.querySelector('summary').textContent.startsWith('Campaign'));
+    await act(async () => campaign.querySelector('summary').click()); await settle();
+    assert.ok(campaign.querySelector('input[type=search]'));
+    const search = campaign.querySelector('input[type=search]');
+    const inputValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+    await act(async () => { inputValue.call(search, '2024'); search.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
+    assert.equal(campaign.querySelectorAll('.rds-sb-facet label').length, 1);
+    await act(async () => { inputValue.call(search, ''); search.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
+    for (const value of ['2023', '2024', '2025']) { const label = [...campaign.querySelectorAll('.rds-sb-facet label')].find(l => l.querySelector('span').textContent === value); await act(async () => label.querySelector('input').click()); await settle(); }
+    assert.equal(campaign.querySelectorAll('input:checked').length, 3);
+    assert.ok(campaign.textContent.includes('Selection limit reached'));
+    assert.ok(queries.at(-1).dimensions.includes('campaign'));
+    assert.equal(new Set(chart.series.map(s => s.label)).size, 3);
+    assert.ok(document.body.textContent.includes('Changes not yet saved'));
+    await click('Save model');
+    let saved = await store.models.load((await store.models.list())[0].id);
+    assert.equal(saved.revision, '1'); assert.ok(!document.body.textContent.includes('Changes not yet saved'));
+    const header = [...document.querySelectorAll('th button')].find(b => b.textContent.startsWith('Harvest'));
+    await act(async () => header.click()); await settle();
+    assert.equal([...document.querySelectorAll('th')].find(th => th.textContent.startsWith('Harvest')).getAttribute('aria-sort'), 'ascending');
+    const columns = document.querySelector('.rds-sb-column-editor');
+    await act(async () => columns.closest('details').querySelector('summary').click()); await settle();
+    const harvest = [...columns.querySelectorAll('label')].find(l => l.textContent === 'Harvest');
+    await act(async () => harvest.querySelector('input').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true }))); await settle();
+    assert.equal(document.querySelectorAll('th')[0].textContent, 'Week');
+    assert.equal(document.querySelectorAll('th')[1].textContent, 'Harvest (kg)');
+    const week = [...columns.querySelectorAll('label')].find(l => l.textContent === 'Week');
+    await act(async () => week.querySelector('input').click()); await settle();
+    assert.equal(document.querySelector('th').textContent, 'Harvest (kg)');
+    await click('Save model'); saved = await store.models.load(saved.id);
+    assert.deepEqual(saved.visualization.table.columns, ['harvest', 'campaign']);
+    assert.deepEqual(saved.visualization.table.sort, { columnId: 'harvest', direction: 'asc' });
+    await click('Scatter');
+    assert.equal(chart.kind, 'scatter'); assert.equal(queries.at(-1).metrics.length, 2);
+    assert.ok(document.body.textContent.includes('Missing chart values omitted'));
+    await click('Open'); assert.ok(document.querySelector('[role=alertdialog]'));
+    await click('Cancel'); assert.equal(chart.kind, 'scatter');
+    await click('Open'); await click('Confirm'); assert.equal(chart.kind, 'line');
+    assert.equal(document.querySelector('th').textContent, 'Harvest (kg)');
+    const oldTable = document.querySelector('tbody').textContent;
+    const oldToken = queries.at(-1).selection.token;
+    const rows = fixture.getRows(); rows[0].harvest_kg = '333.00'; fixture.updateRows(rows);
+    await click('Open'); assert.equal(selections.at(-1).policy, 'latest');
+    assert.notEqual(queries.at(-1).selection.token, oldToken);
+    assert.notEqual(document.querySelector('tbody').textContent, oldTable);
+    await click('Bar');
+    const beforeUnload = new dom.window.Event('beforeunload', { cancelable: true }); window.dispatchEvent(beforeUnload); assert.ok(beforeUnload.defaultPrevented);
+    saved = await store.models.load(saved.id);
+    await store.models.save({ ...saved, title: 'External edit' }, saved.revision);
+    await click('Save model'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
+    assert.ok(document.body.textContent.includes('Changes not yet saved'));
+    await click('Delete model'); assert.ok(document.querySelector('[role=alertdialog]').textContent.includes('Delete model'));
+    await click('Cancel'); assert.equal((await store.models.list()).length, 1);
+    await click('Delete model'); await click('Confirm'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
+    await click('Save as new model'); assert.equal((await store.models.list()).length, 2);
+    // Select the newly created model (fresh revision) and delete only that record.
+    const created = (await store.models.list()).find(m => m.id !== saved.id);
+    await choose('Saved models', created.id);
+    await click('Delete model'); await click('Confirm'); assert.equal((await store.models.list()).length, 1);
+    assert.ok(dirtyEvents.includes(true) && dirtyEvents.includes(false));
+    store.models.list = async () => { throw new Error('Injected list failure'); };
+    await click('Refresh model list');
+    await click('Table');
+    assert.ok(document.querySelector('.rds-sb-models [role=alert]'), 'list errors survive unrelated query updates');
+  } finally {
+    await act(async () => root.unmount()); dom.window.close();
+    for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }
+  }
+});

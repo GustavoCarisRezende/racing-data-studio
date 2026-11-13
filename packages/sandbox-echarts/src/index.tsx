@@ -1,18 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts/core.js';
-import { BarChart, LineChart } from 'echarts/charts.js';
-import type { BarSeriesOption, LineSeriesOption } from 'echarts/charts.js';
+import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts.js';
+import type { BarSeriesOption, LineSeriesOption, PieSeriesOption, ScatterSeriesOption } from 'echarts/charts.js';
 import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components.js';
 import type { AriaComponentOption, GridComponentOption, LegendComponentOption, TooltipComponentOption } from 'echarts/components.js';
 import { SVGRenderer } from 'echarts/renderers.js';
 import type { ChartModel } from '@rds/sandbox-core';
 // No dataset transforms, eval, WASM, Workers, maps, remote loaders or HTML toolbox.
-echarts.use([BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent, AriaComponent, SVGRenderer]);
-export type SandboxChartOption = echarts.ComposeOption<BarSeriesOption | LineSeriesOption | AriaComponentOption | GridComponentOption | LegendComponentOption | TooltipComponentOption>;
+echarts.use([BarChart, LineChart, PieChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, AriaComponent, SVGRenderer]);
+export type SandboxChartOption = echarts.ComposeOption<BarSeriesOption | LineSeriesOption | PieSeriesOption | ScatterSeriesOption | AriaComponentOption | GridComponentOption | LegendComponentOption | TooltipComponentOption>;
 const colors = ['#ff7997', '#65b5ff', '#ffc66d', '#73d8bd', '#d9a3ff', '#e3e6ef'];
 
 /** Only translates a bounded, library-owned model. Never pass external ECharts options. */
 export function toEChartsOption(model: ChartModel): SandboxChartOption {
+  const safe = (v: number) => Number.isFinite(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER;
+  if (model.kind === 'pie' || model.kind === 'scatter') {
+    if (model.series.length > 100) throw new Error('Invalid chart model');
+    const base = { animation: false as const, color: colors, backgroundColor: 'transparent', textStyle: { color: '#f5f7fa' }, aria: { enabled: true, label: { enabled: true, description: model.description }, decal: { show: true } }, tooltip: { trigger: 'item' as const, renderMode: 'richText' as const, confine: true }, legend: { show: false } };
+    if (model.kind === 'pie') {
+      if (!model.slices?.length || model.slices.length > 100 || model.slices.some(s => !safe(s.value) || s.value < 0) || !model.slices.some(s => s.value > 0)) throw new Error('Invalid pie model');
+      return { ...base, series: [{ type: 'pie', radius: '65%', stillShowZeroSum: false, label: { color: '#b8c1d1' }, data: model.slices.map(s => ({ id: s.id, name: s.label, value: s.value })), emphasis: { disabled: true } }] };
+    }
+    if (model.series.reduce((n, s) => n + (s.points?.length ?? 0), 0) > 20_000 || model.series.some(s => !s.points || s.points.some(p => p.value.length !== 2 || p.value.some(v => !safe(v))))) throw new Error('Invalid scatter model');
+    return { ...base, grid: { left: 65, right: 25, bottom: 55, top: 25 }, xAxis: { type: 'value', name: model.xLabel, nameLocation: 'middle', nameGap: 35, scale: true }, yAxis: { type: 'value', name: model.yLabel, nameLocation: 'middle', nameGap: 45, scale: true }, series: model.series.map(s => ({ id: s.id, name: s.label, type: 'scatter', symbolSize: 9, data: s.points!.map(p => ({ id: p.id, name: p.label, value: p.value })), emphasis: { disabled: true } })) };
+  }
   if (!['line', 'bar'].includes(model.kind) || model.series.length > 100 || model.categories.length * model.series.length > 20_000 || model.series.some(s => s.values.length !== model.categories.length || s.values.some(v => v !== null && (!Number.isFinite(v) || Math.abs(v) > Number.MAX_SAFE_INTEGER)))) throw new Error('Invalid chart model');
   return {
     animation: false,

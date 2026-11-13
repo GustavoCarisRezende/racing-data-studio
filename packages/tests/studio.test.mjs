@@ -7,7 +7,7 @@ import { Sandbox } from '@rds/sandbox-react';
 import { createMemoryStore } from '../examples/memory-provider.mjs';
 import { syntheticF1 } from './f1-fixture.mjs';
 
-test('real F1 adapter + studio: named selections, seasons, presets, comparison, synced bindings, preview and save', async () => {
+test('real F1 adapter + studio: named selections, seasons, presets, comparison, single right-side bindings, preview and save', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://synthetic.invalid/' });
   const old = new Map();
   for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) {
@@ -28,10 +28,15 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
   const openFilter = async name => { const summary = [...document.querySelectorAll('.rds-sb-quick-filter summary')].find(node => node.textContent.startsWith(name)); assert.ok(summary); await act(async () => { summary.parentElement.open = true; summary.dispatchEvent(new dom.window.Event('toggle', { bubbles: true })); summary.parentElement.dispatchEvent(new dom.window.Event('toggle')); }); await settle(); };
   const checkName = async name => { const label = [...document.querySelectorAll('.rds-sb-facet label')].find(label => label.querySelector('span')?.textContent === name); assert.ok(label, `named choice ${name}`); await act(async () => label.querySelector('input').click()); await settle(); };
   try {
-    await act(async () => root.render(createElement(Sandbox, { provider, store, locale: 'en-US', ChartRenderer: Renderer })));
+    await act(async () => root.render(createElement(Sandbox, { provider, store, host: { confirm: async () => true }, locale: 'en-US', ChartRenderer: Renderer })));
     await settle();
-    assert.equal(labels('Season')[0].querySelector('select').value, '"2025"');
+    await openFilter('Season');
+    const selectedSeasons = () => [...document.querySelectorAll('.rds-sb-quick-filter')].find(node => node.querySelector('summary').textContent.startsWith('Season')).querySelectorAll('input:checked');
+    assert.equal(selectedSeasons().length, 1);
+    assert.equal(selectedSeasons()[0].closest('label').querySelector('span').textContent, '2025');
     assert.equal(button('Line').getAttribute('aria-pressed'), 'true');
+    assert.equal(labels('Visualization type').length, 0);
+    assert.equal(document.querySelectorAll('.rds-sb-result .rds-sb-bindings').length, 0);
     assert.equal(document.querySelectorAll('tbody tr').length, 42);
     assert.equal(model.series.length, 3);
     assert.ok(model.series.some(s => s.label === 'Ana Lima · 2025'));
@@ -45,7 +50,7 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(document.querySelectorAll('tbody tr').length, 28);
     const selected = [...document.querySelectorAll('.rds-sb-quick-filter[open] .rds-sb-facet input:checked')];
     assert.equal(selected.length, 2);
-    assert.ok(document.querySelector('.rds-sb-selection-summary').textContent.includes('Ana Lima'));
+    assert.ok(document.querySelector('.rds-sb-quick-filter[open] .rds-sb-selection-summary').textContent.includes('Ana Lima'));
 
     await openFilter('Teams'); await checkName('Boreal Racing');
     assert.equal(model.series.length, 1);
@@ -69,15 +74,16 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(document.querySelectorAll('tbody tr').length, 6);
     assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'true');
     await click('Race results');
-    const compare = [...document.querySelectorAll('label')].find(label => label.textContent.includes('Compare selections')).querySelector('input');
-    await act(async () => compare.click()); await settle();
-    assert.equal(labels('Comparison selection')[0].querySelector('select').value, '"2024"');
+    await openFilter('Season'); await checkName('2024');
+    assert.equal(selectedSeasons().length, 2);
+    assert.equal(labels('Comparison selection').length, 0);
     assert.equal(model.series.length, 4);
     assert.ok(model.series.some(s => s.label.includes('2024')));
     assert.equal(document.querySelectorAll('tbody tr').length, 50); // local pagination, not query truncation
 
     const seriesControls = labels('Group by').map(label => label.querySelector('select'));
-    await choose(seriesControls[1], 'team');
+    assert.equal(seriesControls.length, 1);
+    await choose(seriesControls[0], 'team');
     assert.equal(labels('Group by')[0].querySelector('select').value, 'team');
     assert.ok(model.series.some(s => s.label.includes('Aurora Motors')));
     await choose(labels('Group by')[0].querySelector('select'), 'driver');
@@ -86,14 +92,14 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     const preview = document.querySelector('.rds-sb-preview');
     assert.ok(preview.open);
     await act(async () => { preview.open = false; }); assert.equal(preview.open, false);
-    await click('Save analysis');
-    assert.equal((await store.list()).length, 1);
+    await click('Save model');
+    assert.equal((await store.models.list()).length, 1);
     await click('Open');
     assert.equal(model.series.length, 4);
-    assert.equal(labels('Comparison selection')[0].querySelector('select').value, '"2024"');
+    await openFilter('Season');
+    assert.equal(selectedSeasons().length, 2);
     await click('Clear filters');
-    assert.equal(labels('Season')[0].querySelector('select').value, '"2025"');
-    assert.equal(labels('Comparison selection')[0].querySelector('select').value, '"2024"');
+    assert.equal(selectedSeasons().length, 2);
     assert.equal(button('Race results').getAttribute('aria-pressed'), 'true');
     assert.equal(model.series.length, 6);
   } finally {

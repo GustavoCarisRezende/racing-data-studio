@@ -30,7 +30,7 @@ test('React lifecycle: provider query, config change, typed filter, save/open, e
   const exported = [];
   let capturedModel;
   function Renderer({ model }) { capturedModel = model; return createElement('div', { role: 'img', 'aria-label': model.description }, 'Chart'); }
-  const props = { provider, store, host: { exportFiles: async files => { exported.push(files); } }, ChartRenderer: Renderer, locale: 'en-US' };
+  const props = { provider, store, host: { confirm: async () => true, exportFiles: async files => { exported.push(files); } }, ChartRenderer: Renderer, locale: 'en-US' };
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(170); }); };
   const buttons = () => [...dom.window.document.querySelectorAll('button')];
   const button = label => { const b = buttons().find(b => b.textContent === label); assert.ok(b, `button ${label}`); return b; };

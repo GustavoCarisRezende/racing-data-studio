@@ -10,6 +10,11 @@ import { createF1AnalysisStore } from './analysis-store';
 export default function AnalysisScreen({ locale }: { locale: Locale }) {
   const provider = useMemo(() => createF1AnalysisProvider((revisions) => revisions ? invoke('f1_analysis_pinned', { revisions }) : invoke('f1_analysis_snapshots')), []);
   const store = useMemo(() => createF1AnalysisStore(invoke), []);
+  const host = useMemo(() => ({ restoreDefaultModels: async (signal?: AbortSignal) => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    await invoke('f1_models_restore_defaults');
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  } }), []);
   const messages = useMemo(() => locale === 'pt-BR' ? { compareSelections: 'Comparar temporadas', comparisonSelection: 'Temporada de comparação', chartHelp: 'Exploração dos resultados, não classificação oficial. Gráfico aproximado; valores exatos na tabela.' } : { compareSelections: 'Compare seasons', comparisonSelection: 'Comparison season', chartHelp: 'Result exploration, not official standings. Approximate chart; exact values are available in the table.' }, [locale]);
-  return <Sandbox provider={provider} store={store} locale={locale} messages={messages} ChartRenderer={EChartsRenderer} />;
+  return <Sandbox provider={provider} store={store} host={host} locale={locale} messages={messages} ChartRenderer={EChartsRenderer} />;
 }

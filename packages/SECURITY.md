@@ -58,7 +58,7 @@ filesystem ou URL deve ser concedida à biblioteca.
 
 O código próprio não requer Workers, WASM, Blob/data URLs, `eval`, scripts inline,
 CDN, fontes remotas ou `unsafe-eval`. CSS é arquivo externo. ECharts é importado por
-`core/charts/components/renderers`, com apenas linha/barra e SVG registrados.
+`core/charts/components/renderers`, com linha/barra/pizza/dispersão e SVG registrados.
 
 Isso **não comprova compatibilidade com a CSP do Tauri**. ECharts/zrender manipulam
 DOM e estilos em runtime; a distribuição real precisa ser testada com a política

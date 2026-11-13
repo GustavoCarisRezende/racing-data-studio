@@ -9,10 +9,10 @@ acessam banco/importador. Testes usam somente fixtures. Licença do código e da
 
 | Pacote | Responsabilidade |
 |---|---|
-| `@rds/sandbox-contracts` | Protocolo JSON v1, metadados, queries, provider/store/host e validação runtime |
+| `@rds/sandbox-contracts` | Metadados/seleção v1, queries v1/v2/v3, análises fixas v1, modelos latest v2/v3 e validação runtime |
 | `@rds/sandbox-core` | Defaults, configuração, queries, modelo gráfico, valores exatos e CSV + manifesto |
 | `@rds/sandbox-react` | Editor responsivo, filtros, tabela, salvar/abrir por store injetado e i18n |
-| `@rds/sandbox-echarts` | Adapter SVG modular ECharts 6.1.0; linhas e barras |
+| `@rds/sandbox-echarts` | Adapter SVG modular ECharts 6.1.0; linhas, barras, pizza e dispersão |
 
 Os pacotes são privados e ESM, com exports de `dist/`; não são publicados no npm.
 `sandbox-react` não depende do adapter ECharts. React é peer dependency: a aplicação
@@ -54,7 +54,7 @@ import '@rds/sandbox-react/style.css';
 // Instâncias estáveis (useMemo ou módulo), implementadas pelo host.
 <Sandbox
   provider={provider}
-  store={analysisStore}           // opcional: sem store, não há botões de salvar/abrir
+   store={analysisStore}           // v1; .models opcional habilita store de modelos v2
   host={hostServices}             // opcional: sem exportFiles, não há exportação
   ChartRenderer={EChartsRenderer} // opcional: sem renderer, editor só oferece tabela
   locale="pt-BR"
@@ -68,6 +68,11 @@ Para exemplo executável sem I/O, use `examples/memory-provider.mjs` com
 volátil: persistência entre reinícios é responsabilidade do store real.
 
 Guia de integração completo: [docs/SANDBOX_INTEGRATION.md](../docs/SANDBOX_INTEGRATION.md).
+**Interfaces novas e handoff exato para Terra:** [SANDBOX_V2_HANDOFF.md](../docs/SANDBOX_V2_HANDOFF.md).
+**Acumulado entre sessões com recorte múltiplo, grão extra e opt-in v3:**
+[SANDBOX_V3_ACCUMULATION.md](../docs/SANDBOX_V3_ACCUMULATION.md).
+**UI atual, gestão unificada, pizza e correção de avisos indevidos:**
+[SANDBOX_UI_RECOVERY.md](../docs/SANDBOX_UI_RECOVERY.md).
 Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
 
 ## Funcionalidades efetivas
@@ -78,20 +83,43 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
 - Facetas opcionais com busca, paginação e contagem; sem facet, não há editor `in`.
 - Tabela paginada em memória, 50 linhas por página; resultado completo separado da
   apresentação. Exportação inclui todas as linhas, nunca só a página.
-- Linhas e barras apenas quando permitidas pelos dados e quando há renderer.
+- Linhas, barras, pizza e dispersão reais, apenas quando permitidas pelos dados e
+  quando há renderer. Dispersão usa duas métricas distintas compatíveis; omite pares
+  nulos com aviso e preserva negativos. Pizza recusa negativos/total sem valor positivo.
 - Comparação como dimensão adicional; a série inclui todas as identidades agrupadas.
-- Acumulado **do conjunto filtrado**, calculado pelo provider e particionado por
-  todas as séries/comparações. Não promete acumulado oficial ou da temporada inteira.
+- Acumulado **do conjunto filtrado** legado, mais escopo opcional v2 que calcula
+  antes de recortar o eixo. Ambos calculados pelo provider, particionados por todas
+  as séries/comparações. Não prometem classificação oficial ou histórico completo.
+- Perfil de cálculo opt-in v3 separa grão, partição e campos de recorte múltiplo
+  (ex.: rodada e sessão). Cronologia/disponibilidade pertencem ao provider, sem
+  inferência de ordem ou zero no núcleo; desconhecimento cronológico exige erro.
 - Análises fixadas em revisões; restauração resolve `pinned` e verifica as revisões
   e versão de transformação. Sem atualização silenciosa para os dados mais recentes.
 - Salvar/abrir pelo store, com revisão otimista e rejeição de documentos futuros.
+- Modelos latest v2 com criar/abrir/atualizar/renomear/duplicar/excluir por store
+  injetado e CAS; só habilitados com `store.models.documentVersion === 2` e
+  `capabilities.latestSelection === true`. Não contêm snapshots nem linhas de dados.
+- Para perfis/dimensões extras, modelo **v3** e `AnalysisStore.modelsV3` explícitos;
+  esse store lê v2/v3 sem reinterpretar a versão. Sem ele, não salva novos campos
+  no store antigo. Queries, documentos e constantes v1/v2 mantêm a compatibilidade.
+- Multisseleção genérica pesquisável por `capabilities.multiSelection`, preservando
+  o ano/dimensão selecionada na identidade de grupos. Não limitada a duas temporadas.
+- Colunas selecionáveis e reordenáveis por teclado, ordenação decimal exata antes da
+  paginação. Configuração `table.version: 1` persistida nos modelos v2/v3, nunca em v1.
 - CSV UTF-8 + manifesto de consulta, métricas, licença, limitações e revisões.
 - PT-BR e en-US; metadata traduzível, formatação exata de decimais, datas sem desvio
   de fuso e controles nativos por teclado. Trocar idioma não limpa a análise.
-- Três painéis 20/60/20 em containers ≥900px; dois em ≥750px; empilhados abaixo
+- Três painéis 20/60/20 em containers ≥1100px; dois em ≥750px; empilhados abaixo
   disso. O host amplia o canvas da sandbox sem alterar as demais telas.
 - Seleção principal e presets reais via `presentation`, filtros diretos de
-  dimensões, campos sincronizados no centro/direita e preview recolhível.
+  dimensões, configuração somente à direita e preview recolhível.
+- Botões dos cinco gráficos no topo, sem seletor de tipo duplicado. Modelos padrão
+  persistidos e modelos do usuário compartilham um gerenciador; restauração de
+  padrões ausentes só por ação explícita/capacidade do host e com lista atualizada.
+- Medidas calculadas usam `RunningSumProfile.measureLabel` no mesmo seletor de
+  métricas, sem expor um editor técnico de perfis nem reinterpretar documentos antigos.
+- Aviso de alterações não salvas e confirmação ao substituir a edição/excluir
+  modelos; `host.confirm` opcional com fallback local e `host.onDirtyChange` para o shell.
 - Nomes de entidades via `labelField`; códigos traduzidos por `valueLabels`;
   identidades permanecem estáveis nos filtros e consultas.
 - AbortSignals, descarte de respostas antigas, debounce de queries/facetas,
@@ -99,19 +127,22 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
 
 ## Limites assumidos nesta versão
 
-- UI trabalha com **uma métrica** por visualização e até três dimensões: X, série,
-  comparação. O protocolo de query aceita mais métricas para evolução independente.
+- UI trabalha com uma métrica, ou duas na dispersão, e até três dimensões: X/grão,
+  série, comparação. Com query v3, dimensões adicionais permitem grão com quatro ou
+  mais dimensões (até o limite do provider, no máximo 10). A seleção múltipla não agrega anos.
 - Não há query bruta de ocorrências/calendário sem métrica: o editor exige ao menos
   uma métrica e uma dimensão compatíveis. Para datasets apenas tabulares de registros,
   será necessária extensão versionada, não uma contagem fictícia.
-- Não há season-to-date separado de recorte de exibição; filtros precedem o acumulado.
-- Sem fórmulas, SQL, plugins executáveis, média móvel, pizza, dispersão, dashboards,
+- Acumulados F1 e a garantia latest precisam ser implementados no provider por Terra;
+  esta alteração de biblioteca não os habilita no adapter existente em `app/`.
+- Sem fórmulas, SQL, plugins executáveis, média móvel, dashboards,
   importação de arquivos, PNG/SVG/PDF/XLSX ou autosave.
-- A query v1 não tem cursor de resultados. O provider deve retornar um agregado
+- Queries v1/v2 não têm cursor de resultados. O provider deve retornar um agregado
   completo dentro do limite ou lançar `LIMIT_EXCEEDED`. Um resultado incompleto
   pode ser inspecionado como tabela, mas não vira gráfico, análise salva ou exportação.
 - Capacidade máxima declarada: 100 mil linhas; orçamento global de 500 mil células
-  validadas; gráficos limitados a 20 mil células e ao `maxSeries` do dataset.
+  validadas; linha/barra limitadas a 20 mil células, dispersão a 20 mil pontos,
+  pizza a 100 fatias; todos respeitam também `maxSeries` do dataset.
   Esses tetos não são promessa de responsividade em qualquer hardware.
 - Facetas: até 100 valores por página solicitada, 1000 exibidos, 200 selecionados.
   Store list: até 1000 entradas nesta UI; listagem paginada fica para outro protocolo.
@@ -121,8 +152,9 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
   aproximado, recusando magnitudes inseguras e underflow. Cálculos são do provider.
 - Ausência de célula não é zero; renderer não conecta lacunas. O provider precisa
   modelar ausências esperadas: a UI não inventa calendários nem conhecimento histórico.
-- Editor em memória: trocar dataset pode descartar edições não salvas; não há prompt
-  de saída nem recuperação de rascunhos. Análises já salvas não são apagadas.
+- Editor em memória: confirma trocas internas destrutivas e registra `beforeunload`;
+  navegação externa/fechamento nativo dependem de `host.onDirtyChange`. Sem recuperação
+  de rascunhos. Persistência durável é tarefa do host; o store de exemplo é volátil.
 - Mudanças de schema/semântica não são migradas automaticamente: v1 rejeita versões
   incompatíveis. Nenhuma promessa de reprodutibilidade de transformações não mantidas
   pelo provider.

@@ -4,7 +4,7 @@ use std::{error::Error, fs, path::Path};
 use std::collections::BTreeMap;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 7;
 
 pub struct F1Repository {
     // Future F1 queries and transactional writes belong here, never in the shell.
@@ -104,6 +104,16 @@ impl F1Repository {
                 }
             }
             super::jolpica::validate_pages(year, &pages).map_err(|e| format!("Invalid analysis snapshot: {e}"))?;
+            // Preserve only source-provided chronology. A missing sprint date/time is
+            // unknown, not evidence that sprint preceded the race.
+            let mut calendar = Vec::new();
+            for page in pages.iter().filter(|p| p.endpoint == "races") {
+                let root: serde_json::Value = serde_json::from_str(&page.payload)?;
+                let races = root.pointer("/MRData/RaceTable/Races").and_then(serde_json::Value::as_array).ok_or("Invalid calendar")?;
+                for race in races {
+                    calendar.push(serde_json::json!({"round":race["round"], "date":race["date"], "time":race.get("time"), "sprintDate":race.pointer("/Sprint/date"), "sprintTime":race.pointer("/Sprint/time")}));
+                }
+            }
             let mut results = Vec::new();
             for page in pages.iter().filter(|p| p.endpoint != "races") {
                 let root: serde_json::Value = serde_json::from_str(&page.payload)?;
@@ -116,13 +126,22 @@ impl F1Repository {
                     }
                 }
             }
-            snapshots.push(serde_json::json!({"year": year, "id": id.to_string(), "storedAt": stored_at, "sourceDataAt": source_at, "results": results}));
+            snapshots.push(serde_json::json!({"year": year, "id": id.to_string(), "storedAt": stored_at, "sourceDataAt": source_at, "calendar": calendar, "results": results}));
         }
         tx.commit()?;
         Ok(snapshots)
     }
 
     pub fn saved_list(&self) -> std::result::Result<Vec<serde_json::Value>, String> { super::saved_analysis::list(&self.connection) }
+    pub fn models_list(&self) -> std::result::Result<Vec<serde_json::Value>, String> { super::saved_models::list(&self.connection, false) }
+    pub fn model_load(&self, id: &str) -> std::result::Result<serde_json::Value, String> { super::saved_models::load(&self.connection, id, false) }
+    pub fn model_save(&mut self, document: serde_json::Value, expected: Option<String>) -> std::result::Result<serde_json::Value, String> { super::saved_models::save(&mut self.connection, document, expected, false) }
+    pub fn model_delete(&mut self, id: &str, expected: &str) -> std::result::Result<(), String> { super::saved_models::delete(&mut self.connection, id, expected, false) }
+    pub fn models_v3_list(&self) -> std::result::Result<Vec<serde_json::Value>, String> { super::saved_models::list(&self.connection, true) }
+    pub fn model_v3_load(&self, id: &str) -> std::result::Result<serde_json::Value, String> { super::saved_models::load(&self.connection, id, true) }
+    pub fn model_v3_save(&mut self, document: serde_json::Value, expected: Option<String>) -> std::result::Result<serde_json::Value, String> { super::saved_models::save(&mut self.connection, document, expected, true) }
+    pub fn model_v3_delete(&mut self, id: &str, expected: &str) -> std::result::Result<(), String> { super::saved_models::delete(&mut self.connection, id, expected, true) }
+    pub fn models_restore_defaults(&mut self) -> std::result::Result<usize, String> { super::saved_models::restore(&mut self.connection) }
     pub fn saved_load(&self, id: &str) -> std::result::Result<serde_json::Value, String> { super::saved_analysis::load(&self.connection, id) }
     pub fn saved_save(&mut self, document: serde_json::Value, expected: Option<String>) -> std::result::Result<serde_json::Value, String> { super::saved_analysis::save(&mut self.connection, document, expected) }
 
@@ -249,6 +268,21 @@ fn migrate(connection: &mut Connection) -> Result<()> {
         tx.execute_batch(include_str!("migrations/004_saved_analyses.sql"))?;
         tx.pragma_update(None, "user_version", 4)?;
     }
+    if version < 5 {
+        tx.execute_batch(include_str!("migrations/005_saved_models.sql"))?;
+        tx.pragma_update(None, "user_version", 5)?;
+    }
+    if version < 6 {
+        tx.execute_batch(include_str!("migrations/006_model_v3.sql"))?;
+        tx.pragma_update(None, "user_version", 6)?;
+    }
+    if version < 7 {
+        tx.execute_batch(include_str!("migrations/007_default_models.sql"))?;
+        // Only a newly created database receives defaults automatically. An upgrade
+        // never recreates deletions or touches an existing model.
+        if version == 0 { super::saved_models::restore_initial_defaults(&tx).map_err(|e| -> Box<dyn Error> { e.into() })?; }
+        tx.pragma_update(None, "user_version", 7)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -266,7 +300,7 @@ mod tests {
         migrate(&mut db).unwrap();
         migrate(&mut db).unwrap();
         assert_eq!(db.query_row("SELECT year FROM seasons", [], |r| r.get::<_, i64>(0)).unwrap(), 2024);
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 7);
     }
 
     #[test]
@@ -303,9 +337,166 @@ mod tests {
         db.execute("INSERT INTO f1_imports(id, season_year, imported_at) VALUES (7, 2024, '2024-01-01T00:00:00Z')", []).unwrap();
         db.execute("INSERT INTO f1_import_pages VALUES (7, 'races', 0, 'original')", []).unwrap();
         migrate(&mut db).unwrap(); migrate(&mut db).unwrap();
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 7);
         assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
         assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_analyses", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn models_migrate_crud_restore_and_keep_snapshots_and_v1() {
+        use super::super::jolpica::fixtures::season;
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        repo.save(2024, &season(&[1], &["a"])).unwrap();
+        let snapshots = repo.analysis_snapshots().unwrap();
+        let v1 = serde_json::json!({"documentVersion":1,"id":"legacy","revision":null,"title":"Legacy", "datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1", "selection":{"protocolVersion":1,"datasetId":"f1.session_results","token":"token","transformationVersion":"f1-results-1","revisions":[{"partitionId":"2024","revisionId":snapshots[0]["id"],"sourceDataAt":snapshots[0]["sourceDataAt"],"storedAt":snapshots[0]["storedAt"]}]},"visualization":{"kind":"table","x":"season","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":null,"runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let legacy = repo.saved_save(v1, None).unwrap();
+        assert_eq!(repo.models_list().unwrap().len(), 2);
+        assert_eq!(repo.models_v3_list().unwrap().len(), 3);
+        let first = repo.model_load("f1-default-driver-team").unwrap();
+        let old_revision = first["revision"].as_str().unwrap().to_string();
+        let mut edited = first.clone(); edited["title"] = serde_json::json!("My race");
+        let edited = repo.model_save(edited, Some(old_revision.clone())).unwrap();
+        assert_eq!(repo.model_save(first, Some(old_revision.clone())).unwrap_err(), "CONFLICT");
+        assert_eq!(repo.model_delete("f1-default-driver-team", &old_revision).unwrap_err(), "CONFLICT");
+        let sprint = repo.model_load("f1-default-teams").unwrap();
+        repo.model_delete("f1-default-teams", sprint["revision"].as_str().unwrap()).unwrap();
+        assert_eq!(repo.model_delete("f1-default-teams", sprint["revision"].as_str().unwrap()).unwrap_err(), "REVISION_MISSING");
+        migrate(&mut repo.connection).unwrap();
+        assert_eq!(repo.models_list().unwrap().len(), 1); // migration must not recreate deleted defaults
+        assert_eq!(repo.models_restore_defaults().unwrap(), 1);
+        assert_eq!(repo.model_load("f1-default-driver-team").unwrap(), edited);
+        assert_eq!(repo.models_restore_defaults().unwrap(), 0);
+        let sprint2 = repo.model_load("f1-default-driver-team").unwrap();
+        let teams = repo.model_load("f1-default-teams").unwrap();
+        repo.model_delete("f1-default-driver-team", sprint2["revision"].as_str().unwrap()).unwrap();
+        repo.model_delete("f1-default-teams", teams["revision"].as_str().unwrap()).unwrap();
+        repo.connection.execute_batch("CREATE TRIGGER fail_defaults BEFORE INSERT ON f1_saved_models WHEN NEW.id='f1-default-teams' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+        assert!(repo.models_restore_defaults().is_err());
+        assert_eq!(repo.models_list().unwrap().len(), 0); // insertion was rolled back
+        repo.connection.execute_batch("DROP TRIGGER fail_defaults").unwrap();
+        assert_eq!(repo.models_restore_defaults().unwrap(), 2);
+        assert_eq!(repo.saved_load("legacy").unwrap(), legacy);
+        assert_eq!(repo.analysis_snapshots().unwrap(), snapshots);
+        let mut malformed = edited.clone(); malformed["selection"] = serde_json::json!({});
+        assert_eq!(repo.model_save(malformed, Some(edited["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+        let mut invalid_chart = edited.clone(); invalid_chart["visualization"]["kind"] = serde_json::json!("scatter");
+        assert_eq!(repo.model_save(invalid_chart, Some(edited["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+        let mut future = edited.clone(); future["documentVersion"] = serde_json::json!(3);
+        assert_eq!(repo.model_save(future, Some(edited["revision"].as_str().unwrap().into())).unwrap_err(), "UNSUPPORTED_VERSION");
+    }
+
+    #[test]
+    fn models_persist_and_conflict_across_connections() {
+        let base = if std::path::Path::new("/tmp/opencode").is_dir() { std::path::PathBuf::from("/tmp/opencode") } else { std::env::temp_dir() };
+        let path = base.join(format!("rds-model-test-{}-{}.sqlite", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut db = Connection::open(&path).unwrap(); migrate(&mut db).unwrap();
+        let repo = F1Repository { connection: db };
+        let initial = repo.model_load("f1-default-driver-team").unwrap();
+        drop(repo);
+        let mut a = Connection::open(&path).unwrap(); migrate(&mut a).unwrap();
+        let mut b = Connection::open(&path).unwrap(); migrate(&mut b).unwrap();
+        let mut first = F1Repository { connection: a }; let mut second = F1Repository { connection: b };
+        assert_eq!(first.model_load("f1-default-driver-team").unwrap(), initial);
+        let old = initial["revision"].as_str().unwrap().to_owned();
+        let mut update = initial.clone(); update["title"] = serde_json::json!("Edited");
+        let saved = first.model_save(update, Some(old.clone())).unwrap();
+        assert_eq!(second.model_save(initial, Some(old.clone())).unwrap_err(), "CONFLICT");
+        assert_eq!(second.model_delete("f1-default-driver-team", &old).unwrap_err(), "CONFLICT");
+        assert_eq!(second.model_load("f1-default-driver-team").unwrap(), saved);
+        drop(first); drop(second); std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn migration_five_preserves_version_four_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        for sql in [include_str!("migrations/001_initial.sql"), include_str!("migrations/002_snapshots.sql"), include_str!("migrations/003_restore_provenance.sql"), include_str!("migrations/004_saved_analyses.sql")] { db.execute_batch(sql).unwrap(); }
+        db.pragma_update(None, "user_version", 4).unwrap();
+        db.execute("INSERT INTO seasons(year) VALUES(2024)", []).unwrap();
+        db.execute("INSERT INTO f1_imports(id,season_year) VALUES(7,2024)", []).unwrap();
+        db.execute("INSERT INTO f1_import_pages VALUES(7,'races',0,'unchanged')", []).unwrap();
+        db.execute("INSERT INTO f1_saved_analyses VALUES('old','rev','legacy bytes')", []).unwrap();
+        migrate(&mut db).unwrap();
+        assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "unchanged");
+        assert_eq!(db.query_row("SELECT document FROM f1_saved_analyses WHERE id='old'", [], |r| r.get::<_, String>(0)).unwrap(), "legacy bytes");
+        assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_models", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn v3_models_coexist_with_v2_and_old_commands_cannot_mutate_them() {
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        assert_eq!(repo.models_list().unwrap().len(), 2);
+        assert_eq!(repo.models_v3_list().unwrap().len(), 3);
+        let model = repo.model_v3_load("f1-default-cumulative").unwrap();
+        assert_eq!(model["documentVersion"], 3);
+        assert_eq!(repo.model_load("f1-default-cumulative").unwrap_err(), "UNSUPPORTED_VERSION");
+        let rev = model["revision"].as_str().unwrap().to_owned();
+        assert_eq!(repo.model_delete("f1-default-cumulative", &rev).unwrap_err(), "UNSUPPORTED_VERSION");
+        let mut edit = model.clone(); edit["title"] = serde_json::json!("Edited");
+        let saved = repo.model_v3_save(edit, Some(rev.clone())).unwrap();
+        assert_eq!(repo.model_v3_save(model.clone(), Some(rev)).unwrap_err(), "CONFLICT");
+        assert_eq!(repo.model_v3_load("f1-default-cumulative").unwrap(), saved);
+        let mut malformed = saved.clone(); malformed["visualization"]["extraDimensions"] = serde_json::json!(["team"]);
+        assert_eq!(repo.model_v3_save(malformed, Some(saved["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+        let mut disguised = saved.clone(); disguised["documentVersion"] = serde_json::json!(2);
+        assert_eq!(repo.model_v3_save(disguised, Some(saved["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+    }
+
+    #[test]
+    fn new_database_has_exactly_requested_models_and_does_not_reseed() {
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        let ids: Vec<_> = repo.models_v3_list().unwrap().into_iter().map(|v| v["id"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(ids, ["f1-default-cumulative", "f1-default-driver-team", "f1-default-teams"]);
+        let accumulated = repo.model_v3_load(&ids[0]).unwrap();
+        let table = repo.model_v3_load(&ids[1]).unwrap();
+        let pie = repo.model_v3_load(&ids[2]).unwrap();
+        let mut expected: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/f1-default-team-model.json")).unwrap();
+        expected["revision"] = pie["revision"].clone();
+        expected["createdAt"] = pie["createdAt"].clone();
+        expected["updatedAt"] = pie["updatedAt"].clone();
+        assert_eq!(pie, expected);
+        assert_eq!(accumulated["visualization"]["kind"], "bar");
+        assert_eq!(accumulated["visualization"]["calculation"]["profileId"], "driver-all-sessions-v1");
+        assert_eq!(pie["visualization"]["kind"], "pie");
+        assert_eq!(pie["visualization"]["x"], "team");
+        assert_eq!(table["visualization"]["kind"], "table");
+        assert_eq!(table["visualization"]["table"]["columns"], serde_json::json!(["driver","team","season","points"]));
+        repo.model_v3_delete(&ids[0], accumulated["revision"].as_str().unwrap()).unwrap();
+        migrate(&mut repo.connection).unwrap();
+        assert_eq!(repo.models_v3_list().unwrap().len(), 2);
+        assert_eq!(repo.models_restore_defaults().unwrap(), 1);
+        assert_eq!(repo.model_v3_load(&ids[1]).unwrap(), table);
+        assert_eq!(repo.model_v3_load(&ids[2]).unwrap(), pie);
+    }
+
+    #[test]
+    fn migration_seven_does_not_change_or_restore_existing_models() {
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        db.execute("UPDATE f1_saved_models SET document='user bytes', revision='user revision' WHERE id='f1-default-teams'", []).unwrap();
+        db.execute("DELETE FROM f1_saved_models WHERE id='f1-default-cumulative'", []).unwrap();
+        let before: Vec<(String,String,String)> = { let mut stmt = db.prepare("SELECT id,revision,document FROM f1_saved_models ORDER BY id").unwrap(); stmt.query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap() };
+        db.pragma_update(None, "user_version", 6).unwrap();
+        migrate(&mut db).unwrap();
+        let after: Vec<(String,String,String)> = { let mut stmt = db.prepare("SELECT id,revision,document FROM f1_saved_models ORDER BY id").unwrap(); stmt.query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap() };
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn v3_migration_preserves_v2_models_and_snapshots() {
+        let mut db = Connection::open_in_memory().unwrap();
+        for sql in [include_str!("migrations/001_initial.sql"), include_str!("migrations/002_snapshots.sql"), include_str!("migrations/003_restore_provenance.sql"), include_str!("migrations/004_saved_analyses.sql"), include_str!("migrations/005_saved_models.sql")] { db.execute_batch(sql).unwrap(); }
+        super::super::saved_models::restore_defaults(&db).unwrap();
+        let before: String = db.query_row("SELECT document FROM f1_saved_models WHERE id='f1-default-driver-team'", [], |r| r.get(0)).unwrap();
+        db.execute("INSERT INTO seasons(year) VALUES(2024)", []).unwrap();
+        db.execute("INSERT INTO f1_imports(id,season_year) VALUES(7,2024)", []).unwrap();
+        db.execute("INSERT INTO f1_import_pages VALUES(7,'races',0,'original bytes')", []).unwrap();
+        db.pragma_update(None, "user_version", 5).unwrap();
+        migrate(&mut db).unwrap(); migrate(&mut db).unwrap();
+        assert_eq!(db.query_row("SELECT document FROM f1_saved_models WHERE id='f1-default-driver-team'", [], |r| r.get::<_, String>(0)).unwrap(), before);
+        assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original bytes");
+        assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_models", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
     }
 
     #[test]
@@ -405,6 +596,25 @@ mod tests {
         assert_eq!(repo.snapshots(2024).unwrap().len(), 2);
         repo.connection.execute("UPDATE f1_import_pages SET payload = 'corrupt' WHERE import_id = (SELECT MAX(id) FROM f1_imports) AND endpoint = 'results'", []).unwrap();
         assert!(repo.analysis_snapshots().is_err());
+    }
+
+    #[test]
+    fn analysis_calendar_preserves_reported_times_without_inference() {
+        use super::super::jolpica::fixtures::{page, race, result_race};
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        let mut first = race(1);
+        first["time"] = serde_json::json!("15:00:00Z");
+        first["Sprint"] = serde_json::json!({"date":"2024-02-29","time":"12:00:00Z"});
+        let pages = vec![page("races", 0, 2, vec![first, race(2)]), page("results", 0, 1, vec![result_race(1, "results", &["a"])]), page("sprint", 0, 0, vec![])];
+        repo.save(2024, &pages).unwrap();
+        let snapshots = repo.analysis_snapshots().unwrap();
+        let calendar = snapshots[0]["calendar"].as_array().unwrap();
+        assert_eq!(calendar[0]["time"], "15:00:00Z");
+        assert_eq!(calendar[0]["sprintDate"], "2024-02-29");
+        assert_eq!(calendar[0]["sprintTime"], "12:00:00Z");
+        assert!(calendar[1]["sprintDate"].is_null());
+        assert!(calendar[1]["time"].is_null());
     }
 
     #[test]

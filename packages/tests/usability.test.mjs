@@ -1,0 +1,123 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
+import { JSDOM } from 'jsdom';
+import { act, createElement } from 'react';
+import { Sandbox } from '@rds/sandbox-react';
+import { EChartsRenderer } from '@rds/sandbox-echarts';
+import { defaultVisualization, editableKey, forPie } from '@rds/sandbox-core';
+import { createMemoryStore, createMemoryModelStore } from '../examples/memory-provider.mjs';
+import { restoreSyntheticModels } from '../examples/synthetic-models.mjs';
+import { syntheticF1 } from './f1-fixture.mjs';
+import { descriptor as orchard } from './helpers.mjs';
+
+test('editable signature ignores normalization/key/filter-set order, not semantic changes or ordered columns', () => {
+  const v = defaultVisualization(orchard);
+  const filters = [{ fieldId: 'campaign', op: 'in', values: ['2024', '2023'] }, { fieldId: 'plot', op: 'in', values: ['north'] }];
+  const reordered = { runningSum: v.runningSum, comparison: v.comparison, series: v.series, metric: { aggregation: v.metric.aggregation, metricId: v.metric.metricId }, x: v.x, kind: v.kind };
+  assert.equal(editableKey('orchard', 'Title', v, filters), editableKey('orchard', 'Title', reordered, [filters[1], { ...filters[0], values: ['2023', '2024'] }]));
+  assert.equal(editableKey('orchard', 'Title', v, [{ fieldId: 'plot', op: 'in', values: ['e\u0301', 'é', 'é'] }]), editableKey('orchard', 'Title', v, [{ fieldId: 'plot', op: 'in', values: ['é', 'e\u0301'] }]), 'identity keys are compared by wire value, not locale collation');
+  assert.notEqual(editableKey('orchard', 'Title', v, filters), editableKey('orchard', 'Title', { ...v, extraDimensions: [] }, filters), 'a v3 protocol opt-in is not silently normalized away');
+  assert.notEqual(editableKey('orchard', 'Title', { ...v, table: { version: 1, columns: ['week', 'harvest'] } }, filters), editableKey('orchard', 'Title', { ...v, table: { version: 1, columns: ['harvest', 'week'] } }, filters));
+  const pie = forPie(orchard, { ...v, kind: 'line', series: 'plot', comparison: 'campaign' });
+  assert.equal(pie.x, 'plot'); assert.equal(pie.series, null); assert.equal(pie.comparison, 'campaign');
+  assert.equal(v.kind, 'table', 'the original document/configuration is not mutated');
+});
+
+test('real F1 + ECharts UI: unified models, no untouched-model prompts, clean presets, explicit edits, pie and intuitive cumulative measure', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://synthetic.invalid', pretendToBeVisual: true });
+  const old = new Map();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, SVGElement: dom.window.SVGElement, IS_REACT_ACT_ENVIRONMENT: true })) { old.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value }); }
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'clientWidth', { get: () => 800 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'clientHeight', { get: () => 310 });
+  dom.window.HTMLCanvasElement.prototype.getContext = () => ({ measureText: text => ({ width: String(text).length * 7 }) });
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(document.getElementById('root'));
+  const provider = syntheticF1(), d = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
+  const store = { ...createMemoryStore(d), modelsV3: createMemoryModelStore(d, 3) };
+  await restoreSyntheticModels(d, store, 'en-US');
+  const originals = new Map(await Promise.all((await store.modelsV3.list()).map(async item => [item.id, await store.modelsV3.load(item.id)])));
+  // Simulate a native store normalizing JSON property order.
+  const load = store.modelsV3.load;
+  store.modelsV3.load = async (...args) => { const doc = await load(...args); return { ...doc, visualization: Object.fromEntries(Object.entries(doc.visualization).reverse()) }; };
+  const confirmations = [], dirties = [], queries = [];
+  let accept = false, restored = 0, model;
+  const query = provider.query;
+  provider.query = async (...args) => { queries.push(args[0]); return query(...args); };
+  const host = { confirm: async request => { confirmations.push(request); return accept; }, onDirtyChange: value => dirties.push(value), restoreDefaultModels: async signal => { restored++; await restoreSyntheticModels(d, store, 'en-US', signal); } };
+  function Renderer(props) { model = props.model; return createElement(EChartsRenderer, props); }
+  const props = { provider, store, host, ChartRenderer: Renderer, locale: 'en-US' };
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(140); }); };
+  const button = text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, text); return b; };
+  const click = async text => { await act(async () => button(text).click()); await settle(); };
+  const choose = async (label, value) => { const node = [...document.querySelectorAll('label')].find(n => n.firstChild?.textContent === label)?.querySelector('select'); assert.ok(node, label); await act(async () => { node.value = value; node.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle(); };
+  const openModel = async id => { await choose('Saved models', id); await click('Open'); };
+  const setTitle = async value => { const input = document.querySelector('.rds-sb-title input'); await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle(); };
+  try {
+    await act(async () => root.render(createElement(Sandbox, props))); await settle();
+    assert.equal(document.querySelectorAll('.rds-sb-models').length, 1);
+    assert.equal(document.querySelectorAll('.rds-sb-chart-types button').length, 5);
+    assert.ok([...document.querySelectorAll('.rds-sb-chart-types button')].every(b => b.querySelector('svg')));
+    assert.equal(document.querySelectorAll('.rds-sb-config select').length > 0, true);
+    assert.ok(!document.body.textContent.includes('Calculation profile'));
+    await openModel('synthetic-teams');
+    assert.equal(model.kind, 'pie'); assert.equal(model.slices.length, 2);
+    assert.ok(document.querySelector('.rds-sb-chart-surface svg path'), 'actual ECharts pie SVG rendered');
+    await click('Refresh model list');
+    await openModel('synthetic-table');
+    assert.equal(document.querySelectorAll('th').length, 4);
+    await openModel('synthetic-cumulative');
+    assert.equal(queries.at(-1).window.profileId, 'driver-all-sessions-v1');
+    const metric = [...document.querySelectorAll('label')].find(n => n.firstChild?.textContent === 'Metric').querySelector('select');
+    assert.equal(metric.selectedOptions[0].textContent, 'Points after the event');
+    assert.equal(button('Bar').getAttribute('aria-pressed'), 'true');
+    await act(async () => root.render(createElement(Sandbox, { ...props, locale: 'pt-BR' }))); await settle();
+    assert.ok(document.body.textContent.includes('Pontos após o evento'));
+    assert.ok(!document.body.textContent.includes('Perfil de cálculo'));
+    await act(async () => root.render(createElement(Sandbox, props))); await settle();
+    await openModel('synthetic-teams');
+    assert.equal(confirmations.length, 0, 'opening different untouched native-normalized models never asks to discard/save');
+    await click('Sprint results'); await click('Race results');
+    assert.equal(confirmations.length, 0, 'unmodified dataset views establish a new clean baseline');
+    assert.ok(!document.body.textContent.includes('Changes not yet saved'));
+    await click('Pie');
+    assert.equal(model.slices.length, 3, 'explicit pie action groups by category, not round × driver');
+    assert.deepEqual(queries.at(-1).dimensions, ['driver', 'season']);
+    assert.ok(document.querySelector('.rds-sb-chart-surface svg path'));
+    await click('Line'); assert.equal(queries.at(-1).dimensions[0], 'round');
+    await openModel('synthetic-teams');
+    assert.equal(confirmations.length, 0, 'returning to exactly the original chart is clean');
+    await click('Bar');
+    await openModel('synthetic-table');
+    assert.equal(confirmations.length, 1, 'a real chart edit still requires confirmation');
+    assert.equal(model.kind, 'bar', 'declining does not discard the edit');
+    accept = true; await click('Open');
+    await openModel('synthetic-teams');
+    assert.equal(model.kind, 'pie');
+    const count = confirmations.length;
+    await click('Rename'); assert.equal(document.activeElement, document.querySelector('.rds-sb-title input'));
+    assert.ok(!document.body.textContent.includes('Changes not yet saved'), 'focus/rename button alone does not change content');
+    await setTitle('  Edited team model  '); await click('Save model');
+    assert.equal(document.querySelector('.rds-sb-title input').value, 'Edited team model');
+    assert.ok(!document.body.textContent.includes('Changes not yet saved'));
+    await openModel('synthetic-table'); assert.equal(confirmations.length, count, 'saved content is clean again');
+    await setTitle('Unsaved table title');
+    const editedTeam = await load('synthetic-teams');
+    assert.deepEqual(await load('synthetic-cumulative'), originals.get('synthetic-cumulative'), 'opening and changing views never rewrites another model');
+    await store.modelsV3.delete({ id: 'synthetic-cumulative', expectedRevision: originals.get('synthetic-cumulative').revision });
+    assert.equal((await store.modelsV3.list()).length, 2);
+    await click('Restore missing defaults');
+    assert.equal(restored, 1); assert.equal(confirmations.length, count);
+    assert.equal(document.querySelector('.rds-sb-title input').value, 'Unsaved table title');
+    assert.ok(document.body.textContent.includes('Changes not yet saved'));
+    assert.deepEqual(await load('synthetic-teams'), editedTeam);
+    assert.deepEqual(await load('synthetic-table'), originals.get('synthetic-table'));
+    assert.deepEqual((await load('synthetic-cumulative')).visualization, originals.get('synthetic-cumulative').visualization);
+    assert.notEqual((await load('synthetic-cumulative')).revision, originals.get('synthetic-cumulative').revision);
+    assert.equal((await store.modelsV3.list()).length, 3, 'restoring does not duplicate or overwrite defaults');
+    assert.ok(dirties.includes(true) && dirties.includes(false));
+  } finally {
+    await act(async () => root.unmount()); dom.window.close();
+    for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }
+  }
+});

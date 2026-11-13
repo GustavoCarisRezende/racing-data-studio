@@ -98,6 +98,52 @@ pub async fn f1_analysis_save(app: tauri::AppHandle, document: Value, expected_r
 }
 
 #[tauri::command]
+pub async fn f1_models_list(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.models_list()).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_load(app: tauri::AppHandle, id: String) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_load(&id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_delete(app: tauri::AppHandle, id: String, expected_revision: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_delete(&id, &expected_revision)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_models_restore_defaults(app: tauri::AppHandle) -> Result<usize, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.models_restore_defaults()).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_models_v3_list(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.models_v3_list()).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_v3_load(app: tauri::AppHandle, id: String) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_load(&id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_v3_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn f1_model_v3_delete(app: tauri::AppHandle, id: String, expected_revision: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_delete(&id, &expected_revision)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn f1_season_details(app: tauri::AppHandle, year: u16) -> Result<Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|r| r.details(year)).map_err(|e| e.to_string()))

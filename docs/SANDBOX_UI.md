@@ -1,5 +1,13 @@
 # Sandbox: revisão visual e funcional — 08/11/2026
 
+> UI atual de 12/11/2026: [SANDBOX_UI_RECOVERY.md](SANDBOX_UI_RECOVERY.md).
+> Este arquivo conserva o registro visual anterior, inclusive seus breakpoints.
+
+> Registro da revisão visual original. A extensão de biblioteca de 10/11 remove
+> os controles centrais duplicados e adiciona recursos opcionais v2: consulte
+> [SANDBOX_V2_HANDOFF.md](SANDBOX_V2_HANDOFF.md). Recursos dependentes de provider/
+> store não ficam automaticamente habilitados no host F1.
+
 Referência: `temp/exemplo_sandbox_dados.png`. A revisão reproduz a hierarquia do
 estúdio, não controles ilustrativos sem implementação.
 

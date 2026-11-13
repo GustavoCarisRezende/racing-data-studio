@@ -144,6 +144,7 @@ fn parse(value: Value) -> Result<Document> {
     if value.get("filters").and_then(Value::as_array).map_or(true, |filters| filters.iter().any(|f| f.get("op").and_then(Value::as_str) == Some("range") && ["min", "max"].iter().any(|key| f.get(*key).map_or(false, Value::is_null)))) { return Err(invalid()); }
     let doc: Document = serde_json::from_value(value).map_err(|_| invalid())?; validate(&doc)?; Ok(doc)
 }
+pub(super) fn validate_model_common(value: Value) -> Result<()> { parse(value).map(|_| ()) }
 pub fn save(connection: &mut Connection, value: Value, expected: Option<String>) -> Result<Value> {
     let mut doc = parse(value)?;
     if doc.revision != expected || expected.as_ref().map_or(false, |s| s.len() != 32 || !s.bytes().all(|c| c.is_ascii_hexdigit())) { return Err("CONFLICT".into()); }

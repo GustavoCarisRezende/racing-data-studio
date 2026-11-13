@@ -1,0 +1,19 @@
+{
+  "documentVersion": 2,
+  "kind": "model",
+  "id": "f1-default-teams",
+  "revision": null,
+  "title": "Points by team",
+  "datasetId": "f1.session_results",
+  "datasetSchemaVersion": "1",
+  "datasetSemanticVersion": "1",
+  "binding": { "policy": "latest", "partitionIds": [] },
+  "visualization": {
+    "kind": "pie", "x": "team",
+    "metric": { "metricId": "points", "aggregation": "sum" },
+    "series": null, "comparison": "season", "runningSum": false
+  },
+  "filters": [],
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z"
+}

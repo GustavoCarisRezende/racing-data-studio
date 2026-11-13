@@ -1,10 +1,10 @@
 import { SandboxError } from './index.js';
-import type { AnalysisDocument, AnalysisSummary, DatasetDescriptor, DatasetSummary, FacetPage, Filter, PhysicalType, QueryRequest, QueryResult, ResolvedSelection, Scalar, VisualizationSpec } from './index.js';
+import type { AnalysisDocument, AnalysisSummary, DatasetDescriptor, DatasetSummary, FacetPage, Filter, ModelDocument, PhysicalType, QueryRequest, QueryResult, ResolvedSelection, SavedModelDocument, SavedModelDocumentV3, Scalar, VisualizationSpec } from './index.js';
 
 const types = ['string', 'boolean', 'integer', 'decimal', 'date', 'datetime'];
 const aggregations = ['sum', 'mean', 'min', 'max', 'count', 'countDistinct'];
 const operators = ['in', 'range', 'contains', 'isNull', 'isNotNull'];
-const charts = ['table', 'line', 'bar'];
+const charts = ['table', 'line', 'bar', 'pie', 'scatter'];
 const forbidden = new Set(['__proto__', 'constructor', 'prototype']);
 function fail(message: string): never { throw new SandboxError('INVALID_CONTRACT', message); }
 function check(condition: unknown, message: string): asserts condition { if (!condition) fail(message); }
@@ -121,17 +121,47 @@ export function assertDataset(value: unknown): asserts value is DatasetDescripto
     oneOf(m.defaultAggregation, m.aggregations as string[]);
     if ((m.aggregations as string[]).some(a => !['count', 'countDistinct'].includes(a))) check(['integer', 'decimal'].includes(metricField.type), 'Numeric aggregation requires numeric field');
     ids(m.groupableBy); oneOf(m.nullPolicy, ['ignore', 'propagate']); bool(m.additive); bool(m.supportsRunningSum);
-    if (m.requiredDimensions !== undefined) { ids(m.requiredDimensions, 3); check(m.requiredDimensions.every(key => (m.groupableBy as string[]).includes(key)), 'Required dimension must be groupable'); }
+    if (m.requiredDimensions !== undefined) { ids(m.requiredDimensions, 10); check(m.requiredDimensions.every(key => (m.groupableBy as string[]).includes(key)), 'Required dimension must be groupable'); }
     check(!m.supportsRunningSum || (m.additive && (m.aggregations as string[]).includes('sum')), 'Invalid cumulative metric');
     if (m.unit !== undefined) text(m.unit, 100);
     for (const key of m.groupableBy as string[]) check(descriptor.fields.some(f => f.id === key && f.role === 'dimension'), 'Invalid metric dimension');
   }
   const c = object(d.capabilities);
-  array(c.charts, 3); c.charts.forEach(x => oneOf(x, charts));
+  array(c.charts, 5); c.charts.forEach(x => oneOf(x, charts));
   check(new Set(c.charts).size === c.charts.length, 'Duplicate chart capability');
   check((c.charts as string[]).includes('table'), 'Accessible table is required');
   integer(c.maxDimensions, 1, 10); integer(c.maxRows, 1, 100_000); integer(c.maxSeries, 1, 100);
   ids(c.comparisonDimensions); bool(c.runningSum); bool(c.completeGroupedQueries);
+  if (c.queryVersions !== undefined) { array(c.queryVersions, 3); check(c.queryVersions.every(v => v === 1 || v === 2 || v === 3) && c.queryVersions.length > 0 && new Set(c.queryVersions).size === c.queryVersions.length, 'Invalid query versions'); }
+  if (c.latestSelection !== undefined) bool(c.latestSelection);
+  if (c.runningSumScopes !== undefined) {
+    array(c.runningSumScopes, 2); c.runningSumScopes.forEach(v => oneOf(v, ['filteredSelection', 'beforeDisplayFilter']));
+    check(!(c.runningSumScopes as string[]).includes('beforeDisplayFilter') || (c.queryVersions as number[] | undefined)?.includes(2), 'Post-window filtering requires query v2');
+  }
+  if (c.multiSelection !== undefined) {
+    const m = object(c.multiSelection); id(m.fieldId); integer(m.maxValues, 2, 200);
+    check(descriptor.fields.some(f => f.id === m.fieldId && f.role === 'dimension' && f.filters.includes('in') && f.availability !== 'unavailable'), 'Invalid multiselection field');
+  }
+  if (c.runningSumProfiles !== undefined) {
+    array(c.runningSumProfiles, 30); const seen = new Set();
+    for (const raw of c.runningSumProfiles) {
+      const p = object(raw); check(p.version === 1 && c.runningSum && (c.queryVersions as number[] | undefined)?.includes(3), 'Profiles require runningSum and query v3');
+      id(p.id); check(!seen.has(p.id), 'Duplicate calculation profile'); seen.add(p.id);
+      localized(p.label); localized(p.description); id(p.metricId); id(p.axisFieldId);
+      if (p.measureLabel !== undefined) localized(p.measureLabel);
+      ids(p.dimensions, descriptor.capabilities.maxDimensions); ids(p.partitionBy, 10); ids(p.orderDimensions, 10); ids(p.displayFilterFields, 10);
+      const metric = descriptor.metrics.find(m => m.id === p.metricId);
+      check(metric?.additive && metric.supportsRunningSum && metric.aggregations.includes('sum'), 'Invalid profile metric');
+      check(p.dimensions.every(key => descriptor.fields.some(f => f.id === key && f.role === 'dimension' && f.availability !== 'unavailable') && metric.groupableBy.includes(key)), 'Invalid profile dimensions');
+      check((metric.requiredDimensions ?? []).every(key => (p.dimensions as string[]).includes(key)), 'Profile omits required grouping');
+      const parts = [...p.partitionBy, ...p.orderDimensions];
+      check(p.partitionBy.length > 0 && p.orderDimensions.length > 0 && new Set(parts).size === parts.length && parts.length === p.dimensions.length && parts.every(key => (p.dimensions as string[]).includes(key)), 'Partition and chronology must cover profile grain exactly');
+      check(p.orderDimensions.includes(p.axisFieldId) && descriptor.fields.some(f => f.id === p.axisFieldId && f.ordered), 'Invalid profile display axis');
+      check(p.displayFilterFields.every(key => (p.dimensions as string[]).includes(key)), 'Display crop must reference profile dimensions');
+      if (descriptor.capabilities.multiSelection) check(p.partitionBy.includes(descriptor.capabilities.multiSelection.fieldId), 'Profile must partition by selection');
+      const chronology = object(p.chronology); id(chronology.id); check(chronology.missing === 'reject', 'Unknown chronology must fail closed');
+    }
+  }
   for (const key of c.comparisonDimensions as string[]) check(descriptor.fields.some(f => f.id === key && f.role === 'dimension'), 'Invalid comparison dimension');
   for (const raw of d.sources) {
     const source = object(raw); text(source.name); text(source.attribution, 4000); text(source.license);
@@ -214,7 +244,7 @@ function assertFilters(value: unknown, d: DatasetDescriptor): asserts value is F
 
 export function assertQuery(value: unknown, d: DatasetDescriptor): asserts value is QueryRequest {
   const q = object(value);
-  check(q.protocolVersion === 1, 'Unsupported query protocol'); id(q.requestId);
+  check((d.capabilities.queryVersions ?? [1]).includes(q.protocolVersion as 1 | 2 | 3), 'Unsupported query protocol'); id(q.requestId);
   check(q.datasetId === d.id && q.schemaVersion === d.schemaVersion && q.semanticVersion === d.semanticVersion, 'Dataset version mismatch');
   assertSelection(q.selection); check(q.selection.datasetId === d.id, 'Selection dataset mismatch');
   ids(q.dimensions, d.capabilities.maxDimensions); array(q.metrics, 10); check(q.metrics.length > 0, 'Missing metrics');
@@ -230,6 +260,10 @@ export function assertQuery(value: unknown, d: DatasetDescriptor): asserts value
     check((metric.requiredDimensions ?? []).every(key => dimensions.includes(key)), 'Required grouping dimension missing');
   }
   assertFilters(q.filters, d); array(q.orderBy, 10);
+  if (q.displayFilters !== undefined) {
+    check(q.protocolVersion === 2 || q.protocolVersion === 3, 'Display filters require query v2/v3'); assertFilters(q.displayFilters, d);
+    check(q.displayFilters.every(f => dimensions.includes(f.fieldId)), 'Display filters must reference grouped dimensions');
+  }
   const sortFields = new Set();
   for (const raw of q.orderBy) {
     const order = object(raw); check(dimensions.includes(order.fieldId as string) || metricIds.has(order.fieldId as string), 'Invalid sort field');
@@ -237,15 +271,35 @@ export function assertQuery(value: unknown, d: DatasetDescriptor): asserts value
     oneOf(order.direction, ['asc', 'desc']);
   }
   integer(q.limit, 1, d.capabilities.maxRows);
+  if (q.protocolVersion === 3 && q.displayFilters !== undefined) check(object(q.window).scope === 'profile', 'v3 display crops require a profile');
   if (q.window !== undefined) {
-    const w = object(q.window); check(w.kind === 'runningSum' && w.scope === 'filteredSelection', 'Unsupported window');
+    const w = object(q.window); check(w.kind === 'runningSum', 'Unsupported window');
+    const profile = w.scope === 'profile' ? d.capabilities.runningSumProfiles?.find(p => p.id === w.profileId) : undefined;
+    if (w.scope === 'profile') {
+      check(q.protocolVersion === 3 && profile, 'Unknown/unsupported v3 calculation profile');
+      check(w.metricId === profile.metricId && w.orderBy === profile.axisFieldId, 'Profile metric/axis mismatch');
+      check(dimensions.length === profile.dimensions.length && profile.dimensions.every(key => dimensions.includes(key)), 'Profile grain mismatch');
+      ids(w.partitionBy, 10);
+      check(w.partitionBy.length === profile.partitionBy.length && profile.partitionBy.every(key => (w.partitionBy as string[]).includes(key)), 'Profile partition mismatch');
+      check(!(q.filters as Filter[]).some(f => profile.displayFilterFields.includes(f.fieldId)), 'Display-only fields cannot filter calculation input');
+      check(((q.displayFilters ?? []) as Filter[]).every(f => profile.displayFilterFields.includes(f.fieldId)), 'Undeclared post-calculation filter');
+    } else {
+      check(q.protocolVersion !== 3 && w.profileId === undefined, 'Legacy windows cannot use query v3/profile IDs');
+      oneOf(w.scope, d.capabilities.runningSumScopes ?? ['filteredSelection']);
+    }
+    if (w.scope === 'beforeDisplayFilter') {
+      check(q.protocolVersion === 2 && !(q.filters as Filter[]).some(f => f.fieldId === w.orderBy), 'Display axis cannot filter accumulation input');
+      check((q.displayFilters as Filter[] | undefined ?? []).every(f => f.fieldId === w.orderBy), 'Cumulative display crop must use the order axis');
+    }
     const metric = d.metrics.find(m => m.id === w.metricId);
     check(d.capabilities.runningSum && metric?.additive && metric.supportsRunningSum && metricIds.has(metric.id), 'Unsupported cumulative metric');
     check((q.metrics as QueryRequest['metrics']).find(m => m.metricId === metric.id)?.aggregation === 'sum', 'Cumulative requires sum');
     check(dimensions.includes(w.orderBy as string) && d.fields.some(f => f.id === w.orderBy && f.ordered), 'Cumulative requires ordered axis');
     ids(w.partitionBy, 10);
-    const partition = dimensions.filter(key => key !== w.orderBy);
-    check(partition.length === w.partitionBy.length && partition.every(key => (w.partitionBy as string[]).includes(key)), 'Cumulative must partition by all series dimensions');
+    if (!profile) {
+      const partition = dimensions.filter(key => key !== w.orderBy);
+      check(partition.length === w.partitionBy.length && partition.every(key => (w.partitionBy as string[]).includes(key)), 'Cumulative must partition by all series dimensions');
+    }
   }
 }
 
@@ -258,8 +312,69 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
     id(v[key]); check(v[key] !== v.x && d.fields.some(f => f.id === v[key] && f.role === 'dimension' && f.availability !== 'unavailable'), 'Invalid grouping');
   }
   check(v.series === null || v.series !== v.comparison, 'Repeated grouping');
-  check(v.comparison === null || d.capabilities.comparisonDimensions.includes(v.comparison as string), 'Unsupported comparison');
+  check(v.comparison === null || d.capabilities.comparisonDimensions.includes(v.comparison as string) || d.capabilities.multiSelection?.fieldId === v.comparison, 'Unsupported comparison');
   if (v.kind !== 'table') check(d.capabilities.completeGroupedQueries, 'Charts require complete queries');
+  if (v.extraDimensions !== undefined) { ids(v.extraDimensions, 9); check(d.capabilities.queryVersions?.includes(3), 'Extra dimensions require query v3'); }
+  const dimensions = visualizationDimensions(v as unknown as VisualizationSpec);
+  check(new Set(dimensions).size === dimensions.length, 'Repeated grouping dimension');
+  check(dimensions.every(key => d.fields.some(f => f.id === key && f.role === 'dimension' && f.availability !== 'unavailable')), 'Invalid extra dimension');
+  check(dimensions.length <= d.capabilities.maxDimensions, 'Too many dimensions');
+  const selections = [metric];
+  if (v.secondaryMetric !== undefined) {
+    check(v.kind === 'scatter', 'Secondary measure is only valid for scatter');
+    const second = object(v.secondaryMetric); id(second.metricId); oneOf(second.aggregation, aggregations);
+    check(second.metricId !== metric.metricId, 'Scatter measures require distinct metric IDs'); selections.push(second);
+  }
+  check(v.kind !== 'scatter' || v.secondaryMetric !== undefined, 'Scatter requires numeric X and Y measures');
+  check(!v.runningSum || !['pie', 'scatter'].includes(v.kind as string), 'This chart does not support a running sum');
+  for (const selection of selections) {
+    const m = d.metrics.find(m => m.id === selection.metricId);
+    check(m && m.aggregations.includes(selection.aggregation as never) && d.fields.find(f => f.id === m.fieldId)?.availability !== 'unavailable', 'Invalid measure');
+    check(dimensions.every(key => m.groupableBy.includes(key)), 'Incompatible metric grouping');
+    check((m.requiredDimensions ?? []).every(key => dimensions.includes(key)), 'Required grouping missing');
+  }
+  if (v.cumulativeScope !== undefined) oneOf(v.cumulativeScope, d.capabilities.runningSumScopes ?? ['filteredSelection']);
+  if (v.calculation !== undefined) {
+    const calc = object(v.calculation); check(calc.version === 3 && v.runningSum && v.cumulativeScope === undefined, 'Profile configuration requires explicit v3 running sum without legacy scope'); id(calc.profileId);
+    const p = d.capabilities.runningSumProfiles?.find(p => p.id === calc.profileId);
+    check(p && d.capabilities.queryVersions?.includes(3), 'Unavailable calculation profile');
+    check(p.metricId === metric.metricId && metric.aggregation === 'sum' && p.axisFieldId === v.x, 'Incompatible calculation profile');
+    check(dimensions.length === p.dimensions.length && p.dimensions.every(key => dimensions.includes(key)), 'Profile grain mismatch');
+  }
+  if (v.table !== undefined) {
+    const table = object(v.table); check(table.version === 1, 'Unsupported table configuration'); ids(table.columns, 210); check(table.columns.length > 0, 'At least one visible column is required');
+    const available = [...dimensions, ...selections.map(m => m.metricId)];
+    check(table.columns.every(key => available.includes(key)), 'Table column not in query');
+    if (table.sort !== undefined) { const sort = object(table.sort); id(sort.columnId); check(available.includes(sort.columnId), 'Invalid table sort column'); oneOf(sort.direction, ['asc', 'desc']); }
+  }
+}
+
+function projectVisualization(v: VisualizationSpec): VisualizationSpec {
+  return { kind: v.kind, x: v.x, metric: { metricId: v.metric.metricId, aggregation: v.metric.aggregation }, series: v.series, comparison: v.comparison, runningSum: v.runningSum,
+    ...(v.secondaryMetric ? { secondaryMetric: { metricId: v.secondaryMetric.metricId, aggregation: v.secondaryMetric.aggregation } } : {}),
+    ...(v.cumulativeScope ? { cumulativeScope: v.cumulativeScope } : {}),
+    ...(v.extraDimensions ? { extraDimensions: [...v.extraDimensions] } : {}),
+    ...(v.calculation ? { calculation: { version: 3, profileId: v.calculation.profileId } } : {}),
+    ...(v.table ? { table: { version: 1, columns: [...v.table.columns], ...(v.table.sort ? { sort: { columnId: v.table.sort.columnId, direction: v.table.sort.direction } } : {}) } } : {}) };
+}
+export function visualizationDimensions(v: VisualizationSpec): string[] {
+  return [v.x, v.series, v.comparison, ...(v.extraDimensions ?? [])].filter((key): key is string => typeof key === 'string');
+}
+/** Shared wire projection: persistence validation and core must route filters identically. */
+export function configurationQuery(d: DatasetDescriptor, selection: ResolvedSelection, v: VisualizationSpec, filters: Filter[], requestId: string): QueryRequest {
+  assertVisualization(v, d);
+  const dimensions = visualizationDimensions(v);
+  const post = v.runningSum && v.cumulativeScope === 'beforeDisplayFilter';
+  const profile = v.calculation ? d.capabilities.runningSumProfiles?.find(p => p.id === v.calculation!.profileId) : undefined;
+  if (v.calculation && !profile) fail('Unavailable calculation profile');
+  const displayFields = profile?.displayFilterFields ?? (post ? [v.x] : []);
+  return { protocolVersion: profile || v.extraDimensions !== undefined ? 3 : post ? 2 : (d.capabilities.queryVersions ?? [1]).includes(1) ? 1 : 2, requestId, datasetId: d.id, schemaVersion: d.schemaVersion, semanticVersion: d.semanticVersion, selection,
+    dimensions, metrics: [v.metric, ...(v.kind === 'scatter' && v.secondaryMetric ? [v.secondaryMetric] : [])], filters: filters.filter(f => !displayFields.includes(f.fieldId)),
+    ...(post || profile ? { displayFilters: filters.filter(f => displayFields.includes(f.fieldId)) } : {}), orderBy: [{ fieldId: v.x, direction: 'asc' }, ...dimensions.filter(key => key !== v.x).map(fieldId => ({ fieldId, direction: 'asc' as const }))],
+    ...(v.runningSum ? { window: { kind: 'runningSum', metricId: v.metric.metricId, orderBy: v.x, partitionBy: profile?.partitionBy ?? dimensions.filter(x => x !== v.x), scope: profile ? 'profile' : post ? 'beforeDisplayFilter' : 'filteredSelection', ...(profile ? { profileId: profile.id } : {}) } } : {}), limit: d.capabilities.maxRows };
+}
+function validateConfiguration(d: DatasetDescriptor, selection: ResolvedSelection, v: VisualizationSpec, filters: Filter[]) {
+  assertQuery(configurationQuery(d, selection, v, filters, 'validate'), d);
 }
 
 /** Accepts JSON text or an unknown transport value; strips unknown properties by projection. */
@@ -277,18 +392,15 @@ export function parseAnalysisDocument(input: unknown, d: DatasetDescriptor): Ana
   assertSelection(a.selection); check(a.selection.datasetId === d.id, 'Analysis selection mismatch');
   assertVisualization(a.visualization, d); assertFilters(a.filters, d); instant(a.createdAt); instant(a.updatedAt);
   const v = a.visualization;
-  const dimensions = [v.x, v.series, v.comparison].filter((x): x is string => x !== null);
-  assertQuery({ protocolVersion: 1, requestId: 'validate', datasetId: d.id, schemaVersion: d.schemaVersion, semanticVersion: d.semanticVersion,
-    selection: a.selection, dimensions, metrics: [v.metric], filters: a.filters, orderBy: [{ fieldId: v.x, direction: 'asc' }],
-    ...(v.runningSum ? { window: { kind: 'runningSum', metricId: v.metric.metricId, orderBy: v.x, partitionBy: dimensions.filter(x => x !== v.x), scope: 'filteredSelection' } } : {}),
-    limit: d.capabilities.maxRows }, d);
+  check(['line', 'bar', 'table'].includes(v.kind) && v.secondaryMetric === undefined && v.table === undefined && v.cumulativeScope === undefined && v.extraDimensions === undefined && v.calculation === undefined, 'New configuration requires a v2/v3 model; v1 is never silently upgraded');
+  validateConfiguration(d, a.selection, v, a.filters);
   // Project every nested wire object; never call an untrusted toJSON or persist extras.
   const selection = a.selection;
   const filters = a.filters.map(f => f.op === 'in' ? { fieldId: f.fieldId, op: f.op, values: [...f.values] } : f.op === 'range' ? { fieldId: f.fieldId, op: f.op, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}) } : f.op === 'contains' ? { fieldId: f.fieldId, op: f.op, value: f.value } : { fieldId: f.fieldId, op: f.op });
   const result = { documentVersion: 1, id: a.id, revision: a.revision, title: a.title, datasetId: a.datasetId,
     datasetSchemaVersion: a.datasetSchemaVersion, datasetSemanticVersion: a.datasetSemanticVersion,
     selection: { protocolVersion: 1, datasetId: selection.datasetId, token: selection.token, transformationVersion: selection.transformationVersion, revisions: selection.revisions.map(r => ({ partitionId: r.partitionId, revisionId: r.revisionId, sourceDataAt: r.sourceDataAt, storedAt: r.storedAt })) },
-    visualization: { kind: v.kind, x: v.x, metric: { metricId: v.metric.metricId, aggregation: v.metric.aggregation }, series: v.series, comparison: v.comparison, runningSum: v.runningSum },
+    visualization: projectVisualization(v),
     filters, createdAt: a.createdAt, updatedAt: a.updatedAt };
   let serialized: string;
   try { serialized = JSON.stringify(result); } catch { fail('Document is not JSON'); }
@@ -296,8 +408,41 @@ export function parseAnalysisDocument(input: unknown, d: DatasetDescriptor): Ana
   return JSON.parse(serialized) as AnalysisDocument;
 }
 
+function parseModel(input: unknown, d: DatasetDescriptor, version: 2 | 3): ModelDocument {
+  let value = input;
+  if (typeof input === 'string') { check(input.length <= 256_000, 'Model too large'); try { value = JSON.parse(input); } catch { fail('Invalid JSON'); } }
+  const m = object(value);
+  if (m.documentVersion !== version) throw new SandboxError('UNSUPPORTED_VERSION', 'Unsupported model document version');
+  check(m.kind === 'model' && m.selection === undefined, 'Models must not contain pinned snapshots');
+  id(m.id); if (m.revision !== null) { text(m.revision, 200); check(m.revision.length > 0, 'Missing revision'); }
+  text(m.title, 200); check(m.title.trim().length > 0, 'Missing model title'); instant(m.createdAt); instant(m.updatedAt);
+  check(m.datasetId === d.id && m.datasetSchemaVersion === d.schemaVersion && m.datasetSemanticVersion === d.semanticVersion, 'Model dataset version mismatch');
+  const binding = object(m.binding); check(binding.policy === 'latest' && binding.revisions === undefined && binding.token === undefined, 'Only latest binding is allowed'); ids(binding.partitionIds, 2000);
+  assertVisualization(m.visualization, d); assertFilters(m.filters, d);
+  check(version === 3 || (m.visualization.extraDimensions === undefined && m.visualization.calculation === undefined), 'New calculation/grain requires model v3');
+  if (d.capabilities.multiSelection) {
+    const multi = d.capabilities.multiSelection;
+    check(visualizationDimensions(m.visualization).includes(multi.fieldId), 'Models must preserve selection grouping');
+    const filter = m.filters.find(f => f.fieldId === multi.fieldId);
+    check(filter?.op !== 'in' || filter.values.length <= multi.maxValues, 'Too many selections');
+  }
+  validateConfiguration(d, { protocolVersion: 1, datasetId: d.id, token: 'validation', revisions: [], transformationVersion: 'validation' }, m.visualization, m.filters);
+  const v = projectVisualization(m.visualization);
+  const filters = m.filters.map(f => f.op === 'in' ? { fieldId: f.fieldId, op: f.op, values: [...f.values] } : f.op === 'range' ? { fieldId: f.fieldId, op: f.op, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}) } : f.op === 'contains' ? { fieldId: f.fieldId, op: f.op, value: f.value } : { fieldId: f.fieldId, op: f.op });
+  const projected = { documentVersion: version, kind: 'model', id: m.id, revision: m.revision, title: m.title, datasetId: m.datasetId, datasetSchemaVersion: m.datasetSchemaVersion, datasetSemanticVersion: m.datasetSemanticVersion,
+    binding: { policy: 'latest', partitionIds: [...binding.partitionIds] }, visualization: v, filters, createdAt: m.createdAt, updatedAt: m.updatedAt };
+  const serialized = JSON.stringify(projected); check(serialized.length <= 256_000, 'Model too large'); return JSON.parse(serialized) as ModelDocument;
+}
+export function parseModelDocument(input: unknown, d: DatasetDescriptor): SavedModelDocument { return parseModel(input, d, 2) as SavedModelDocument; }
+export function parseModelDocumentV3(input: unknown, d: DatasetDescriptor): SavedModelDocumentV3 { return parseModel(input, d, 3) as SavedModelDocumentV3; }
+export function parseSavedModelDocument(input: unknown, d: DatasetDescriptor): ModelDocument {
+  let value = input;
+  if (typeof input === 'string') { check(input.length <= 256_000, 'Model too large'); try { value = JSON.parse(input); } catch { fail('Invalid JSON'); } }
+  return object(value).documentVersion === 3 ? parseModelDocumentV3(value, d) : parseModelDocument(value, d);
+}
+
 export function assertResult(value: unknown, q: QueryRequest, d: DatasetDescriptor): asserts value is QueryResult {
-  const r = object(value); check(r.protocolVersion === 1 && r.requestId === q.requestId && r.selectionToken === q.selection.token, 'Stale or mismatched result');
+  const r = object(value); check(r.protocolVersion === q.protocolVersion && r.requestId === q.requestId && r.selectionToken === q.selection.token, 'Stale or mismatched result');
   array(r.columns, 210); array(r.rows, q.limit); bool(r.complete); array(r.warnings, 100);
   check(r.rows.length * r.columns.length <= 500_000, 'Result exceeds cell budget; refine query');
   if (r.totalRows !== null) integer(r.totalRows, 0, Number.MAX_SAFE_INTEGER);
