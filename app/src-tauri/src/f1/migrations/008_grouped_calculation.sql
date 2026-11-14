@@ -1,0 +1,1 @@
+-- Version gate for v3 models using the team-aware cumulative profile; no rows changed.

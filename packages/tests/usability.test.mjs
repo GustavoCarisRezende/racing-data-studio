@@ -71,6 +71,12 @@ test('real F1 + ECharts UI: unified models, no untouched-model prompts, clean pr
     const metric = [...document.querySelectorAll('label')].find(n => n.firstChild?.textContent === 'Metric').querySelector('select');
     assert.equal(metric.selectedOptions[0].textContent, 'Points after the event');
     assert.equal(button('Bar').getAttribute('aria-pressed'), 'true');
+    await choose('Group by', 'driver-sessions-by-team-v1');
+    assert.equal(queries.at(-1).window.profileId, 'driver-sessions-by-team-v1');
+    assert.equal(queries.at(-1).orderBy[0].fieldId, 'round');
+    assert.ok(queries.at(-1).dimensions.includes('driver') && queries.at(-1).dimensions.includes('team'));
+    assert.deepEqual(queries.at(-1).window.partitionBy, ['driver', 'season']);
+    await choose('Group by', 'driver-all-sessions-v1');
     await act(async () => root.render(createElement(Sandbox, { ...props, locale: 'pt-BR' }))); await settle();
     assert.ok(document.body.textContent.includes('Pontos após o evento'));
     assert.ok(!document.body.textContent.includes('Perfil de cálculo'));

@@ -4,7 +4,7 @@ use std::{error::Error, fs, path::Path};
 use std::collections::BTreeMap;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 pub struct F1Repository {
     // Future F1 queries and transactional writes belong here, never in the shell.
@@ -283,6 +283,10 @@ fn migrate(connection: &mut Connection) -> Result<()> {
         if version == 0 { super::saved_models::restore_initial_defaults(&tx).map_err(|e| -> Box<dyn Error> { e.into() })?; }
         tx.pragma_update(None, "user_version", 7)?;
     }
+    if version < 8 {
+        tx.execute_batch(include_str!("migrations/008_grouped_calculation.sql"))?;
+        tx.pragma_update(None, "user_version", 8)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -300,7 +304,7 @@ mod tests {
         migrate(&mut db).unwrap();
         migrate(&mut db).unwrap();
         assert_eq!(db.query_row("SELECT year FROM seasons", [], |r| r.get::<_, i64>(0)).unwrap(), 2024);
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 7);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 8);
     }
 
     #[test]
@@ -337,7 +341,7 @@ mod tests {
         db.execute("INSERT INTO f1_imports(id, season_year, imported_at) VALUES (7, 2024, '2024-01-01T00:00:00Z')", []).unwrap();
         db.execute("INSERT INTO f1_import_pages VALUES (7, 'races', 0, 'original')", []).unwrap();
         migrate(&mut db).unwrap(); migrate(&mut db).unwrap();
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 7);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 8);
         assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
         assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_analyses", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
@@ -441,6 +445,35 @@ mod tests {
         assert_eq!(repo.model_v3_save(malformed, Some(saved["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
         let mut disguised = saved.clone(); disguised["documentVersion"] = serde_json::json!(2);
         assert_eq!(repo.model_v3_save(disguised, Some(saved["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+    }
+
+    #[test]
+    fn team_grouped_calculation_is_versioned_and_persists_without_rewriting_old_models() {
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let mut repo = F1Repository { connection: db };
+        let old = repo.model_v3_load("f1-default-cumulative").unwrap();
+        let mut model = old.clone();
+        model["visualization"]["series"] = serde_json::json!("team");
+        model["visualization"]["extraDimensions"] = serde_json::json!(["driver", "session"]);
+        model["visualization"]["calculation"]["profileId"] = serde_json::json!("driver-sessions-by-team-v1");
+        let saved = repo.model_v3_save(model, Some(old["revision"].as_str().unwrap().into())).unwrap();
+        assert_eq!(repo.model_v3_load("f1-default-cumulative").unwrap(), saved);
+        let mut invalid = saved.clone(); invalid["visualization"]["extraDimensions"] = serde_json::json!(["session"]);
+        assert_eq!(repo.model_v3_save(invalid, Some(saved["revision"].as_str().unwrap().into())).unwrap_err(), "INVALID_CONTRACT");
+        assert_eq!(repo.models_v3_list().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn migration_eight_does_not_rewrite_models_or_snapshots() {
+        let mut db = Connection::open_in_memory().unwrap(); migrate(&mut db).unwrap();
+        let before: Vec<(String, String, String)> = { let mut s = db.prepare("SELECT id, revision, document FROM f1_saved_models ORDER BY id").unwrap(); s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap() };
+        db.execute("INSERT INTO seasons(year) VALUES(2024)", []).unwrap();
+        db.execute("INSERT INTO f1_imports(id,season_year) VALUES(7,2024)", []).unwrap();
+        db.execute("INSERT INTO f1_import_pages VALUES(7,'races',0,'original')", []).unwrap();
+        db.pragma_update(None, "user_version", 7).unwrap(); migrate(&mut db).unwrap();
+        let after: Vec<(String, String, String)> = { let mut s = db.prepare("SELECT id, revision, document FROM f1_saved_models ORDER BY id").unwrap(); s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<std::result::Result<_,_>>().unwrap() };
+        assert_eq!(after, before);
+        assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
     }
 
     #[test]

@@ -23,6 +23,18 @@ não são fabricados como zero. Filtro de equipe é rejeitado em consultas acumu
 perder pontos obtidos anteriormente em outra equipe. Outros filtros de população
 podem excluir resultados. Esta soma não é classificação oficial.
 
+Na métrica **Pontos após o evento**, `Agrupar por` alterna entre piloto e equipe.
+Por equipe, cada série continua identificada também por piloto, temporada e sessão:
+o valor é o acumulado daquele piloto até aquela sessão, não um total da equipe.
+Trocar de equipe não reinicia a soma. Não se somam acumulados de pilotos nem se
+presume continuidade entre equipes. Se um piloto tiver resultados associados a
+equipes diferentes na mesma sessão, a ordem é ambígua e a consulta é recusada.
+O eixo X permanece rodada. Horários ausentes/empatados e pontos nulos conservam
+as mesmas regras do perfil anterior; o filtro de equipe continua bloqueado em
+acumulados para não excluir pontos anteriores. Modelos antigos não são alterados;
+o novo perfil tem ID próprio e é salvo somente após escolha explícita. A migration
+8 apenas versiona o suporte e não reescreve documentos nem snapshots.
+
 ### Bloqueio anterior dos protocolos v1/v2
 
 O contrato atual só permite `displayFilters` no eixo da janela. O editor move

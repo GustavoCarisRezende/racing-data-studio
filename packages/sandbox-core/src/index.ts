@@ -117,7 +117,7 @@ export function withCalculationProfile(d: DatasetDescriptor, v: VisualizationSpe
   const p = d.capabilities.runningSumProfiles?.find(p => p.id === profileId);
   if (!p) throw new SandboxError('INVALID_QUERY', 'Unavailable calculation profile');
   const comparison = d.capabilities.multiSelection?.fieldId ?? p.partitionBy[0]!;
-  const series = p.partitionBy.find(key => key !== comparison) ?? null;
+  const series = p.groupingField ?? p.partitionBy.find(key => key !== comparison) ?? null;
   const next: VisualizationSpec = { ...v, kind: ['pie', 'scatter'].includes(v.kind) ? 'table' : v.kind, x: p.axisFieldId, metric: { metricId: p.metricId, aggregation: 'sum' }, series, comparison: d.capabilities.comparisonDimensions.includes(comparison) || d.capabilities.multiSelection?.fieldId === comparison ? comparison : null,
     runningSum: true, calculation: { version: 3, profileId }, extraDimensions: [] };
   next.extraDimensions = p.dimensions.filter(key => ![next.x, next.series, next.comparison].includes(key));

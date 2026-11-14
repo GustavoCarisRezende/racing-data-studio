@@ -70,6 +70,9 @@ export interface RunningSumProfile {
   chronology: { id: string; missing: 'reject' };
   /** These fields MUST be filtered after calculation, never as population filters. */
   displayFilterFields: string[];
+  /** Optional presentation grouping alternatives. Profiles keep independent semantics. */
+  groupingFamily?: string;
+  groupingField?: string;
 }
 export interface DatasetDescriptor extends DatasetSummary {
   protocolVersion: 1;

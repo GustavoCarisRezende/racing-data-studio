@@ -158,8 +158,21 @@ export function assertDataset(value: unknown): asserts value is DatasetDescripto
       check(p.partitionBy.length > 0 && p.orderDimensions.length > 0 && new Set(parts).size === parts.length && parts.length === p.dimensions.length && parts.every(key => (p.dimensions as string[]).includes(key)), 'Partition and chronology must cover profile grain exactly');
       check(p.orderDimensions.includes(p.axisFieldId) && descriptor.fields.some(f => f.id === p.axisFieldId && f.ordered), 'Invalid profile display axis');
       check(p.displayFilterFields.every(key => (p.dimensions as string[]).includes(key)), 'Display crop must reference profile dimensions');
+      if (p.groupingFamily !== undefined || p.groupingField !== undefined) {
+        id(p.groupingFamily); id(p.groupingField);
+        check(p.groupingField !== p.axisFieldId && p.groupingField !== descriptor.capabilities.multiSelection?.fieldId && (p.dimensions as string[]).includes(p.groupingField), 'Invalid profile grouping field');
+      }
       if (descriptor.capabilities.multiSelection) check(p.partitionBy.includes(descriptor.capabilities.multiSelection.fieldId), 'Profile must partition by selection');
       const chronology = object(p.chronology); id(chronology.id); check(chronology.missing === 'reject', 'Unknown chronology must fail closed');
+    }
+    const families = new Map<string, { metricId: string; axisFieldId: string; partition: string; crop: string; chronology: string; fields: Set<string> }>();
+    for (const p of descriptor.capabilities.runningSumProfiles ?? []) if (p.groupingFamily && p.groupingField) {
+      const partition = [...p.partitionBy].sort().join('\0'), crop = [...p.displayFilterFields].sort().join('\0');
+      const existing = families.get(p.groupingFamily);
+      if (existing) {
+        check(existing.metricId === p.metricId && existing.axisFieldId === p.axisFieldId && existing.partition === partition && existing.crop === crop && existing.chronology === p.chronology.id && !existing.fields.has(p.groupingField), 'Incompatible grouping profiles');
+        existing.fields.add(p.groupingField);
+      } else families.set(p.groupingFamily, { metricId: p.metricId, axisFieldId: p.axisFieldId, partition, crop, chronology: p.chronology.id, fields: new Set([p.groupingField]) });
     }
   }
   for (const key of c.comparisonDimensions as string[]) check(descriptor.fields.some(f => f.id === key && f.role === 'dimension'), 'Invalid comparison dimension');

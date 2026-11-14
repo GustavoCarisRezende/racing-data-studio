@@ -56,9 +56,16 @@ fn parse(raw: Value) -> Result<Model> {
     for d in std::iter::once(&v.x).chain(v.series.iter()).chain(v.comparison.iter()).chain(v.extra_dimensions.iter().flatten()) {
         if !["season", "round", "driver", "team", "session"].contains(&d.as_str()) || !dims.insert(d.as_str()) { return Err(invalid()); }
     }
-    if dims.len() > 4 || !dims.contains("season") || !["table", "line", "bar", "pie", "scatter"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |s| s != "season") || !metric(&v.metric) || v.cumulative_scope.as_deref().map_or(false, |s| s != "filteredSelection") { return Err(invalid()); }
+    if dims.len() > if doc.document_version == 3 { 5 } else { 3 } || !dims.contains("season") || !["table", "line", "bar", "pie", "scatter"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |s| s != "season") || !metric(&v.metric) || v.cumulative_scope.as_deref().map_or(false, |s| s != "filteredSelection") { return Err(invalid()); }
     match &v.calculation {
-        Some(c) => if doc.document_version != 3 || c.version != 3 || c.profile_id != "driver-all-sessions-v1" || !v.running_sum || v.x != "round" || v.metric.metric_id != "points" || v.metric.aggregation != "sum" || dims != HashSet::from(["round", "driver", "season", "session"]) || !["table", "line", "bar"].contains(&v.kind.as_str()) || v.cumulative_scope.is_some() { return Err(invalid()); },
+        Some(c) => {
+            let expected = match c.profile_id.as_str() {
+                "driver-all-sessions-v1" => HashSet::from(["round", "driver", "season", "session"]),
+                "driver-sessions-by-team-v1" => HashSet::from(["round", "driver", "season", "session", "team"]),
+                _ => return Err(invalid()),
+            };
+            if doc.document_version != 3 || c.version != 3 || !v.running_sum || v.x != "round" || v.metric.metric_id != "points" || v.metric.aggregation != "sum" || dims != expected || !["table", "line", "bar"].contains(&v.kind.as_str()) || v.cumulative_scope.is_some() { return Err(invalid()); }
+        },
         None => if v.running_sum && (v.x != "round" && v.x != "season" || v.metric.metric_id != "points" || v.metric.aggregation != "sum" || !["table", "line", "bar"].contains(&v.kind.as_str()) || v.extra_dimensions.is_some()) { return Err(invalid()); },
     }
     match (&v.secondary_metric, v.kind.as_str()) {

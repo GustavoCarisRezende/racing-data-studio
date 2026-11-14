@@ -227,3 +227,37 @@ test('v3 cumulative uses chronological sessions before round/session display cro
   input = [unknown]; const nullSelection = await provider.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
   assert.equal((await provider.query({ ...q, selection: nullSelection })).rows[0].values.points, null);
 });
+
+test('team grouping retains driver cumulative identity, changes teams without reset and rejects ambiguous assignments', async () => {
+  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const item = (round, session, driver, team, points) => { const r = entry(round, session, driver, points); r.result.Constructor = { constructorId: team, name: team }; return r; };
+  const one = snapshot(2024, '1', [item('1', 'sprint', 'a', 'old', '2'), item('1', 'results', 'a', 'old', '5'), item('2', 'results', 'a', 'new', '3'), item('1', 'results', 'b', 'old', '4'), item('2', 'results', 'b', 'old', null)]);
+  one.calendar = [{ round: '1', date: '2024-03-03', time: '15:00:00Z', sprintDate: '2024-03-02', sprintTime: '12:00:00Z' }, { round: '2', date: '2024-03-10', time: '15:00:00Z', sprintDate: null, sprintTime: null }];
+  const two = snapshot(2025, '2', [item('1', 'results', 'a', 'new', '11')]); two.calendar = [{ round: '1', date: '2025-03-03', time: '15:00:00Z', sprintDate: null, sprintTime: null }];
+  let input = [one, two]; const provider = createProvider(async () => structuredClone(input));
+  const d = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
+  const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
+  const view = core.withCalculationProfile(d, d.presentation.defaultVisualization, 'driver-sessions-by-team-v1');
+  assert.equal(view.x, 'round'); assert.equal(view.series, 'team'); assert.ok(view.extraDimensions.includes('driver'));
+  const query = core.buildQuery(d, selection, view, [], 'teams-v3');
+  assert.deepEqual(query.window.partitionBy, ['driver', 'season']);
+  const result = await provider.query(query); contracts.assertResult(result, query, d);
+  const value = (year, round, driver, session) => result.rows.find(r => r.values.season === year && r.values.round === round && r.values.driver === driver && r.values.session === session)?.values;
+  assert.equal(value('2024', 1, 'a', 'sprint').points, '2');
+  assert.equal(value('2024', 1, 'a', 'results').points, '7');
+  assert.equal(value('2024', 2, 'a', 'results').points, '10');
+  assert.equal(value('2024', 2, 'a', 'results').team, 'new');
+  assert.equal(value('2024', 2, 'b', 'results').points, null);
+  assert.equal(value('2025', 1, 'a', 'results').points, '11');
+  const cropped = await provider.query({ ...query, displayFilters: [{ fieldId: 'round', op: 'range', min: 2 }, { fieldId: 'session', op: 'in', values: ['results'] }] });
+  assert.equal(cropped.rows.find(r => r.values.driver === 'a').values.points, '10');
+  const chart = core.buildChartModel(d, query, result, 'bar', 'en-US', 'Synthetic');
+  assert.ok(chart.series.some(s => s.label.includes('new') && s.label.includes('a')));
+  assert.ok(chart.series.some(s => s.label.includes('old') && s.label.includes('b')));
+  const ambiguous = structuredClone(one); ambiguous.id = '3'; ambiguous.results.push(item('1', 'results', 'a', 'new', '1'));
+  input = [ambiguous]; const bad = await provider.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
+  await assert.rejects(provider.query({ ...query, selection: bad }), error => error.code === 'ORDER_UNAVAILABLE');
+  const missing = structuredClone(one); missing.id = '4'; missing.calendar[0].sprintTime = null; input = [missing];
+  const missingSelection = await provider.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
+  await assert.rejects(provider.query({ ...query, selection: missingSelection }), error => error.code === 'ORDER_UNAVAILABLE');
+});
