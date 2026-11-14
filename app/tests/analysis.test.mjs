@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 
 let server, createProvider, createStore, contracts;
 before(async () => {
-  server = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
+  server = await createServer({ server: { middlewareMode: true, watch: null, ws: false }, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] } });
   ({ createF1AnalysisProvider: createProvider } = await server.ssrLoadModule('/src/categories/f1/analysis-provider.ts'));
   ({ createF1AnalysisStore: createStore } = await server.ssrLoadModule('/src/categories/f1/analysis-store.ts'));
   contracts = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-contracts/dist/index.js', import.meta.url).pathname);
@@ -37,6 +37,29 @@ test('local snapshot results: exact totals, facets, filters, pinned selection an
   await assert.rejects(provider.query({ ...request, limit: 1 }));
   await assert.rejects(provider.query({ ...request, selection: { ...selection, token: 'invalid' } }));
   await assert.rejects(provider.facet({ protocolVersion: 1, datasetId: descriptor.id, selection, fieldId: 'driver', filters: [], search: '', limit: 100, cursor: '-1' }));
+});
+
+test('F1 point aggregations use decimal arithmetic, propagate nulls and round means explicitly', async () => {
+  const provider = createProvider(async () => [snapshot(2024, '1', [
+    entry('1', 'results', 'a', '0.1'), entry('1', 'results', 'b', '0.2'), entry('1', 'results', 'c', '0.2'),
+    entry('2', 'results', 'a', null), entry('2', 'results', 'b', '9'),
+    entry('3', 'results', 'a', '-0.000000000001'), entry('3', 'results', 'b', '0'),
+    entry('4', 'results', 'a', '1.000000000000001'), entry('4', 'results', 'b', '1.000000000000002'),
+  ])]);
+  const descriptor = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
+  const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: descriptor.id, policy: 'latest', partitionIds: [] });
+  const request = base(selection, descriptor);
+  for (const [aggregation, expected] of [
+    ['sum', ['0.5', null, '-0.000000000001', '2.000000000000003']],
+    ['min', ['0.1', null, '-0.000000000001', '1.000000000000001']],
+    ['max', ['0.2', null, '0', '1.000000000000002']],
+    ['mean', ['0.166666666667', null, '-0.000000000001', '1.000000000000002']],
+  ]) {
+    const q = { ...request, metrics: [{ metricId: 'points', aggregation }] };
+    const result = await provider.query(q);
+    contracts.assertResult(result, q, descriptor);
+    assert.deepEqual(result.rows.map(row => row.values.points), expected);
+  }
 });
 
 test('empty catalog and malformed source fail closed', async () => {

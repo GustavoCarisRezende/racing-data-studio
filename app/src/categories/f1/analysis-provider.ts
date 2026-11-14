@@ -1,7 +1,7 @@
 import { assertDataset, assertQuery, assertSelection, compareDecimal, isScalarOfType, SandboxError } from '@rds/sandbox-contracts';
 import type { DatasetDescriptor, FacetRequest, Filter, QueryRequest, ResolvedSelection, RevisionReference, SandboxDataProvider, Scalar, SelectionRequest } from '@rds/sandbox-contracts';
 
-type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; calendar?: { round: string; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null } }[] };
+type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null } }[] };
 type Row = Record<string, Scalar>;
 const text = (fallback: string, pt: string) => ({ fallback, translations: { 'pt-BR': pt } });
 const dimensions = ['season', 'round', 'session', 'driver', 'team'];
@@ -12,21 +12,22 @@ export const descriptor: DatasetDescriptor = {
   grain: text('One source result occurrence in a race or sprint.', 'Uma ocorrência de resultado da fonte em corrida ou sprint.'),
   fields: [
     { id: 'season', label: text('Season', 'Temporada'), type: 'string', role: 'dimension', analyticalType: 'ordinal', nullable: false, ordered: true, filters: ['in', 'contains'], availability: 'available' },
-    { id: 'round', label: text('Round', 'Rodada'), type: 'integer', role: 'dimension', analyticalType: 'ordinal', nullable: false, ordered: true, filters: ['in', 'range'], availability: 'available' },
+    { id: 'round', label: text('Round', 'Rodada'), type: 'integer', role: 'dimension', analyticalType: 'ordinal', nullable: false, ordered: true, filters: ['in', 'range'], availability: 'available', labelField: 'round_name' },
     { id: 'session', label: text('Session', 'Sessão'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: false, ordered: false, filters: ['in', 'contains'], availability: 'available', valueLabels: [{ value: 'results', label: text('Race', 'Corrida') }, { value: 'sprint', label: text('Sprint', 'Sprint') }] },
     { id: 'driver', label: text('Driver', 'Piloto'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: ['in', 'contains', 'isNull', 'isNotNull'], availability: 'partial', labelField: 'driver_name' },
     { id: 'team', label: text('Team', 'Equipe'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: ['in', 'contains', 'isNull', 'isNotNull'], availability: 'partial', labelField: 'team_name' },
     { id: 'driver_name', label: text('Driver name', 'Nome do piloto'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: [], availability: 'partial' },
     { id: 'team_name', label: text('Team name', 'Nome da equipe'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: [], availability: 'partial' },
+    { id: 'round_name', label: text('Round and event', 'Rodada e evento'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: [], availability: 'partial' },
     { id: 'points_raw', label: text('Reported points', 'Pontos informados'), type: 'decimal', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
     { id: 'occurrence_raw', label: text('Occurrence', 'Ocorrência'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: false, ordered: false, filters: [], availability: 'available' },
   ],
   metrics: [
-    { id: 'points', label: text('Points', 'Pontos'), description: text('Sum of source result points, not official championship standings.', 'Soma dos pontos dos resultados da fonte; não é classificação oficial.'), fieldId: 'points_raw', aggregations: ['sum'], defaultAggregation: 'sum', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'propagate', additive: true, supportsRunningSum: true },
+    { id: 'points', label: text('Points', 'Pontos'), description: text('Source result points, not official championship standings. Missing values propagate. Means are rounded half away from zero to at least 12 fractional places, retaining source precision.', 'Pontos dos resultados da fonte; não são classificação oficial. Valores ausentes propagam. Médias são arredondadas para longe de zero em empates, com pelo menos 12 casas decimais e preservação da precisão da fonte.'), fieldId: 'points_raw', aggregations: ['sum', 'mean', 'min', 'max'], defaultAggregation: 'sum', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'propagate', additive: true, supportsRunningSum: true },
     { id: 'observations', label: text('Result occurrences', 'Ocorrências de resultado'), description: text('Number of source result occurrences.', 'Quantidade de ocorrências de resultado da fonte.'), fieldId: 'occurrence_raw', aggregations: ['count'], defaultAggregation: 'count', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'ignore', additive: false, supportsRunningSum: false },
   ],
   sources: [{ name: 'Jolpica F1', attribution: 'Jolpica F1 API contributors', license: 'CC BY-NC-SA 4.0', url: 'https://github.com/jolpica/jolpica-f1' }],
-  limitations: [text('Only imported results; missing events are not zero. Points sums are not official standings. Team IDs do not imply historical continuity. Round does not identify the same circuit across seasons.', 'Somente resultados importados; eventos ausentes não são zero. A soma de pontos não é classificação oficial. IDs de equipe não implicam continuidade histórica. Rodada não identifica o mesmo circuito entre temporadas.'), text('Cumulative values use observed results only, propagate null points, and require unambiguous source session timestamps. Population filters may exclude results. Export is unavailable.', 'Acumulados usam apenas resultados observados, propagam pontos nulos e exigem horários inequívocos das sessões na fonte. Filtros de população podem excluir resultados. Exportação indisponível.')],
+  limitations: [text('Only imported results; missing events are not zero. Points sums are not official standings. Team IDs do not imply historical continuity. Round does not identify the same circuit across seasons.', 'Somente resultados importados; eventos ausentes não são zero. A soma de pontos não é classificação oficial. IDs de equipe não implicam continuidade histórica. Rodada não identifica o mesmo circuito entre temporadas.'), text('Cumulative values use observed results only, propagate null points, and require unambiguous source session timestamps. Population filters may exclude results.', 'Acumulados usam apenas resultados observados, propagam pontos nulos e exigem horários inequívocos das sessões na fonte. Filtros de população podem excluir resultados.')],
   capabilities: { charts: ['table', 'line', 'bar', 'pie', 'scatter'], maxDimensions: 5, maxRows: 5000, maxSeries: 100, comparisonDimensions: ['season'], runningSum: true, completeGroupedQueries: true, latestSelection: true, multiSelection: { fieldId: 'season', maxValues: 20 }, queryVersions: [1, 3], runningSumProfiles: [
     { version: 1, id: 'driver-all-sessions-v1', groupingFamily: 'driver-points-v1', groupingField: 'driver', label: text('Driver points by session', 'Pontos do piloto por sessão'), description: text('All observed previous sessions; round and session only crop the display. Not official standings.', 'Todas as sessões observadas anteriores; rodada e sessão apenas recortam a exibição. Não é classificação oficial.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
     { version: 1, id: 'driver-sessions-by-team-v1', groupingFamily: 'driver-points-v1', groupingField: 'team', label: text('Driver points by team and session', 'Pontos do piloto por equipe e sessão'), measureLabel: text('Points after the event', 'Pontos após o evento'), description: text('Team identifies each driver’s result in that session; values remain driver totals, never team totals. Team changes do not reset accumulation. Ambiguous team assignments are rejected.', 'Equipe identifica o resultado de cada piloto na sessão; valores são totais do piloto, nunca da equipe. Mudanças de equipe não reiniciam o acumulado. Vínculos ambíguos são recusados.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session', 'team'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session', 'team'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
@@ -71,6 +72,25 @@ function sum(values: Scalar[]): string | null {
   return `${negative ? '-' : ''}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
 }
 
+/** Decimal strings only: never convert points to binary floating point for aggregation. */
+function aggregatePoints(values: Scalar[], aggregation: 'sum' | 'mean' | 'min' | 'max'): string | null {
+  if (values.some(v => v === null)) return null;
+  const numbers = values as string[];
+  if (aggregation === 'sum') return sum(values);
+  if (aggregation === 'min' || aggregation === 'max') return numbers.reduce((a, b) => (aggregation === 'min' ? compareDecimal(a, b) <= 0 : compareDecimal(a, b) >= 0) ? a : b);
+  const total = sum(values)!;
+  const [whole, fraction = ''] = total.replace(/^-/, '').split('.');
+  const scale = Math.max(12, numbers.reduce((n, v) => Math.max(n, v.split('.')[1]?.length ?? 0), 0));
+  const numerator = BigInt(whole + fraction.padEnd(scale, '0'));
+  const count = BigInt(numbers.length);
+  let quotient = numerator / count;
+  if (numerator % count * 2n >= count) quotient += 1n;
+  const digits = quotient.toString().padStart(scale + 1, '0');
+  const result = `${total.startsWith('-') && quotient !== 0n ? '-' : ''}${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+  if (!isScalarOfType(result, 'decimal')) throw new SandboxError('LIMIT_EXCEEDED', 'Mean exceeds decimal precision limit');
+  return result;
+}
+
 /** The injected reader is the only native boundary; snapshots are held immutable in this instance. */
 export function createF1AnalysisProvider(read: (revisions?: RevisionReference[]) => Promise<Snapshot[]>): SandboxDataProvider {
   let frozen: { selection: ResolvedSelection; rows: Row[]; chronology: Map<string, number | null> } | undefined;
@@ -83,7 +103,10 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       const selection: ResolvedSelection = { protocolVersion: 1, datasetId: descriptor.id, token: crypto.randomUUID(), transformationVersion: 'f1-results-1', revisions };
       assertSelection(selection);
       for (const s of snapshots) {
+      const roundNames = new Map<number, string>();
       for (const event of s.calendar ?? []) {
+        if (event.raceName != null && (typeof event.raceName !== 'string' || event.raceName.length > 400)) throw new SandboxError('INVALID_CONTRACT', 'Invalid event name');
+        if (event.raceName?.trim()) roundNames.set(Number(event.round), `${Number(event.round)} · ${event.raceName.trim()}`);
         for (const [session, date, time] of [['results', event.date, event.time], ['sprint', event.sprintDate, event.sprintTime]] as const) {
           const key = JSON.stringify([String(s.year), Number(event.round), session]);
           const iso = `${date}T${time}`;
@@ -100,7 +123,7 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
         if (parts.some(value => value !== undefined && (typeof value !== 'string' || value.length > 200)) || (item.result.Constructor?.name !== undefined && (typeof item.result.Constructor.name !== 'string' || item.result.Constructor.name.length > 400))) throw new SandboxError('INVALID_CONTRACT', 'Invalid source display name');
         const driverName = parts.filter(Boolean).join(' ').trim();
         const teamName = item.result.Constructor?.name?.trim();
-        rows.push({ season: String(s.year), round, session: item.session, driver, driver_name: driverName || driver, team, team_name: teamName || team, points_raw: points, occurrence_raw: 1 });
+        rows.push({ season: String(s.year), round, round_name: roundNames.get(round) ?? null, session: item.session, driver, driver_name: driverName || driver, team, team_name: teamName || team, points_raw: points, occurrence_raw: 1 });
         if (rows.length > 100_000) throw new SandboxError('LIMIT_EXCEEDED', 'Too many occurrences');
       }
       }
@@ -162,7 +185,7 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       let output = [...groups.entries()].map(([key, group], index) => {
         const values: Row = Object.fromEntries(q.dimensions.map(k => [k, group[0][k]]));
         for (const id of q.dimensions) { const label = descriptor.fields.find(f => f.id === id)?.labelField; if (label) values[label] = group.find(row => row[label] !== null)?.[label] ?? null; }
-        for (const m of q.metrics) values[m.metricId] = m.metricId === 'points' ? sum(group.map(r => r.points_raw)) : group.length;
+        for (const m of q.metrics) values[m.metricId] = m.metricId === 'points' ? aggregatePoints(group.map(r => r.points_raw), m.aggregation as 'sum' | 'mean' | 'min' | 'max') : group.length;
         return { id: String(index), values, key };
       });
       if (q.window) {
@@ -197,18 +220,24 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       output.sort((a, b) => { for (const o of q.orderBy) { const diff = o.fieldId === 'points' && a.values.points !== null && b.values.points !== null ? compareDecimal(String(a.values.points), String(b.values.points)) : cmp(a.values[o.fieldId], b.values[o.fieldId]); if (diff) return o.direction === 'asc' ? diff : -diff; } return a.key.localeCompare(b.key); });
       const columnIds = [...new Set([...q.dimensions.flatMap(id => [id, ...(descriptor.fields.find(f => f.id === id)?.labelField ? [descriptor.fields.find(f => f.id === id)!.labelField!] : [])]), ...q.metrics.map(m => m.metricId)])];
       const columns = columnIds.map(id => { const f = descriptor.fields.find(x => x.id === id); const m = descriptor.metrics.find(x => x.id === id); return { id, label: (f ?? m)!.label, type: f?.type ?? (id === 'points' ? 'decimal' as const : 'integer' as const) }; });
-      return { protocolVersion: q.protocolVersion, requestId: q.requestId, selectionToken: q.selection.token, columns, rows: output.map(({ id, values }) => ({ id, values })), complete: true, totalRows: output.length, warnings: q.window ? [{ code: 'OBSERVED_ONLY', message: text('Cumulative sum of observed results after population filters; missing results are not zero and this is not official standings.', 'Soma acumulada dos resultados observados após filtros de população; resultados ausentes não são zero e não é classificação oficial.') }] : [] };
+      return { protocolVersion: q.protocolVersion, requestId: q.requestId, selectionToken: q.selection.token, columns, rows: output.map(({ id, values }) => ({ id, values })), complete: true, totalRows: output.length, warnings: [
+        ...(q.window ? [{ code: 'OBSERVED_ONLY', message: text('Cumulative sum of observed results after population filters; missing results are not zero and this is not official standings.', 'Soma acumulada dos resultados observados após filtros de população; resultados ausentes não são zero e não é classificação oficial.') }] : []),
+        ...(q.metrics.some(m => m.metricId === 'points' && m.aggregation === 'mean') ? [{ code: 'MEAN_ROUNDED', message: text('Means are rounded half away from zero to at least 12 decimal places, retaining source precision. Missing points propagate.', 'Médias são arredondadas para longe de zero em empates, com pelo menos 12 casas decimais e preservação da precisão da fonte. Pontos ausentes propagam.') }] : []),
+      ] };
     },
     async facet(req: FacetRequest, signal) {
       abort(signal); const field = descriptor.fields.find(f => f.id === req.fieldId);
       if (req.protocolVersion !== 1 || req.datasetId !== descriptor.id || !field?.filters.includes('in') || req.filters.some(f => f.fieldId === req.fieldId) || typeof req.search !== 'string' || req.search.length > 300 || !Number.isInteger(req.limit) || req.limit < 1 || req.limit > 100 || (req.cursor !== undefined && !/^(0|[1-9]\d{0,5})$/.test(req.cursor))) throw new SandboxError('INVALID_QUERY', 'Invalid facet');
       assertQuery({ protocolVersion: 1, requestId: 'facet', datasetId: descriptor.id, schemaVersion: descriptor.schemaVersion, semanticVersion: descriptor.semanticVersion, selection: req.selection, dimensions: ['season'], metrics: [{ metricId: 'points', aggregation: 'sum' }], filters: req.filters, orderBy: [], limit: 1 }, descriptor);
-       const counts = new Map<string | number | boolean, { label: string; count: number }>();
+       const counts = new Map<string | number | boolean, { labels: Set<string>; count: number }>();
        for (const row of selected(req.selection).rows) {
          const value = row[req.fieldId]; const label = String(field.labelField ? row[field.labelField] ?? value : value);
-         if (value !== null && matches(row, req.filters) && `${label} ${value}`.toLowerCase().includes(req.search.toLowerCase())) counts.set(value, { label, count: (counts.get(value)?.count ?? 0) + 1 });
+         if (value !== null && matches(row, req.filters) && (field.id === 'round' || `${label} ${value}`.toLowerCase().includes(req.search.toLowerCase()))) {
+           const item = counts.get(value) ?? { labels: new Set<string>(), count: 0 };
+           item.labels.add(label); item.count++; counts.set(value, item);
+         }
        }
-       const all = [...counts].sort(([a], [b]) => field.id === 'season' ? cmp(b, a) : cmp(a, b)).map(([value, info]) => ({ value, ...info }));
+       const all = [...counts].filter(([value, info]) => `${value} ${[...info.labels].join(' ')}`.toLowerCase().includes(req.search.toLowerCase())).sort(([a], [b]) => field.id === 'season' ? cmp(b, a) : cmp(a, b)).map(([value, info]) => ({ value, label: field.id === 'round' && info.labels.size > 1 ? String(value) : [...info.labels].at(-1)!, count: info.count }));
        const labelCounts = new Map<string, number>();
        for (const item of all) labelCounts.set(item.label, (labelCounts.get(item.label) ?? 0) + 1);
        for (const item of all) if (labelCounts.get(item.label)! > 1) item.label = `${item.label} (${item.value})`;

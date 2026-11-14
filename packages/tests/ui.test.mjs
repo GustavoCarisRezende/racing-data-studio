@@ -42,6 +42,7 @@ test('React lifecycle: provider query, config change, typed filter, save/open, e
   };
   try {
     await act(async () => root.render(createElement(Sandbox, props))); await settle();
+    await click('Table');
     assert.equal(dom.window.document.querySelectorAll('tbody tr').length, 3);
     assert.ok(dom.window.document.body.textContent.includes('39.60'));
     assert.ok(!dom.window.document.querySelector('[role=alert]'));
@@ -59,6 +60,8 @@ test('React lifecycle: provider query, config change, typed filter, save/open, e
     await click('Open');
     assert.equal(capturedModel.series.length, 4);
     assert.ok(dom.window.document.body.textContent.includes('Saved analysis opened.'));
+    await click('Edit mode');
+    await click('Table');
     // Choose an integer membership filter via faceted values, not string parsing.
     await act(async () => document.querySelector('.rds-sb-advanced summary').click()); await settle();
     await act(async () => [...document.querySelectorAll('.rds-sb-advanced summary')].find(node => node.textContent === 'Add filter').click()); await settle();

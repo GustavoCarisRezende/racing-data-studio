@@ -220,14 +220,30 @@ export interface VisualizationSpec {
   /** Model/query v3 only. Extra grouped dimensions, including session-level grain. */
   extraDimensions?: string[];
   calculation?: { version: 3; profileId: string };
+  /** Presentation only. Missing means the legacy pie appearance and order. */
+  pie?: PieConfiguration;
   table?: TableConfiguration;
 }
-export interface TableConfiguration {
+export interface PieConfiguration {
+  version: 1;
+  order: 'source' | 'asc' | 'desc';
+  /** Strictly less than this non-negative decimal goes into Other. */
+  otherBelow?: string;
+  showLegend: boolean;
+  showLabels: boolean;
+}
+export type TableSort = { columnId: string; direction: 'asc' | 'desc' };
+export type TableConfiguration = {
   version: 1;
   /** Ordered visible logical column IDs, not DOM positions or translated labels. */
   columns: string[];
-  sort?: { columnId: string; direction: 'asc' | 'desc' };
-}
+  sort?: TableSort;
+} | {
+  version: 2;
+  columns: string[];
+  sorts: TableSort[];
+  groupBy?: string;
+};
 export interface AnalysisDocument {
   documentVersion: 1;
   id: string;
@@ -288,11 +304,15 @@ export interface AnalysisStore {
   save(document: AnalysisDocument, expectedRevision: string | null, signal?: AbortSignal): Promise<AnalysisDocument>;
 }
 export interface ExportArtifact { name: string; mediaType: string; text: string }
+export interface ImageExportArtifact { format: 'svg' | 'png' | 'jpeg'; bytes: Uint8Array }
 export interface SandboxHostServices {
+  /** Host-owned exact reserved IDs, not titles; presentation only, never access control. */
+  defaultModelIds?: readonly string[];
   /** Restore only missing persisted defaults; never overwrite existing/edited records. */
   restoreDefaultModels?: (signal?: AbortSignal) => Promise<void>;
   /** Native chooser/write remains the host's responsibility. No arbitrary fs in UI. */
   exportFiles?: (files: ExportArtifact[], signal?: AbortSignal) => Promise<void>;
+  exportImage?: (file: ImageExportArtifact, signal?: AbortSignal) => Promise<void>;
   confirm?: (request: { kind: 'discardChanges' | 'deleteModel'; title: string }, signal?: AbortSignal) => Promise<boolean>;
   /** Shell must use this to protect navigation outside the library. */
   onDirtyChange?: (dirty: boolean) => void;

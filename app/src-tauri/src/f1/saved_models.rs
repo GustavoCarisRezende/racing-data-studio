@@ -17,10 +17,18 @@ struct Metric { metric_id: String, aggregation: String }
 struct Sort { column_id: String, direction: String }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Table { version: u8, columns: Vec<String>, #[serde(skip_serializing_if = "Option::is_none")] sort: Option<Sort> }
+struct Table {
+    version: u8, columns: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] sort: Option<Sort>,
+    #[serde(skip_serializing_if = "Option::is_none")] sorts: Option<Vec<Sort>>,
+    #[serde(skip_serializing_if = "Option::is_none")] group_by: Option<String>,
+}
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Calculation { version: u8, profile_id: String }
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Pie { version: u8, order: String, #[serde(skip_serializing_if = "Option::is_none")] other_below: Option<String>, show_legend: bool, show_labels: bool }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Visualization {
@@ -30,6 +38,7 @@ struct Visualization {
     #[serde(skip_serializing_if = "Option::is_none")] table: Option<Table>,
     #[serde(skip_serializing_if = "Option::is_none")] extra_dimensions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")] calculation: Option<Calculation>,
+    #[serde(skip_serializing_if = "Option::is_none")] pie: Option<Pie>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -38,11 +47,13 @@ struct Model {
     dataset_id: String, dataset_schema_version: String, dataset_semantic_version: String,
     binding: Binding, visualization: Visualization, filters: Vec<Value>, created_at: String, updated_at: String,
 }
-fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as_str()), ("points", "sum") | ("observations", "count")) }
+fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as_str()), ("points", "sum" | "mean" | "min" | "max") | ("observations", "count")) }
 fn parse(raw: Value) -> Result<Model> {
     let serialized = serde_json::to_string(&raw).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 || raw.get("revision").is_none() || raw.pointer("/visualization/series").is_none() || raw.pointer("/visualization/comparison").is_none() { return Err(invalid()); }
-    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
+    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation", "pie"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
+    if raw.pointer("/visualization/pie/otherBelow").map_or(false, Value::is_null) { return Err(invalid()); }
+    for key in ["sort", "sorts", "groupBy"] { if raw.pointer(&format!("/visualization/table/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
     let doc: Model = serde_json::from_value(raw).map_err(|_| invalid())?;
     if ![2, 3].contains(&doc.document_version) { return Err("UNSUPPORTED_VERSION".into()); }
     if doc.kind != "model" || doc.binding.policy != "latest" || doc.binding.partition_ids.len() > 151 { return Err(invalid()); }
@@ -51,6 +62,9 @@ fn parse(raw: Value) -> Result<Model> {
     // Reuse the v1 native validation for shared IDs, timestamps, version and filters.
     super::saved_analysis::validate_model_common(json!({"documentVersion":1,"id":doc.id,"revision":doc.revision,"title":doc.title,"datasetId":doc.dataset_id,"datasetSchemaVersion":doc.dataset_schema_version,"datasetSemanticVersion":doc.dataset_semantic_version,"selection":{"protocolVersion":1,"datasetId":"f1.session_results","token":"model-validation","transformationVersion":"f1-results-1","revisions":[{"partitionId":"2024","revisionId":"1","sourceDataAt":"2024-01-01T00:00:00Z","storedAt":"2024-01-01T00:00:00Z"}]},"visualization":{"kind":"table","x":"season","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":null,"runningSum":false},"filters":doc.filters,"createdAt":doc.created_at,"updatedAt":doc.updated_at}))?;
     let v = &doc.visualization;
+    if let Some(pie) = &v.pie {
+        if pie.version != 1 || !["source", "asc", "desc"].contains(&pie.order.as_str()) || pie.other_below.as_ref().map_or(false, |s| s.starts_with('-') || !super::saved_analysis::decimal(s)) { return Err(invalid()); }
+    }
     let mut dims = HashSet::new();
     if doc.document_version == 2 && (v.extra_dimensions.is_some() || v.calculation.is_some()) { return Err(invalid()); }
     for d in std::iter::once(&v.x).chain(v.series.iter()).chain(v.comparison.iter()).chain(v.extra_dimensions.iter().flatten()) {
@@ -74,9 +88,19 @@ fn parse(raw: Value) -> Result<Model> {
         _ => return Err(invalid()),
     }
     if let Some(table) = &v.table {
-        let mut allowed = dims; allowed.insert(&v.metric.metric_id); if let Some(m) = &v.secondary_metric { allowed.insert(&m.metric_id); }
+        let mut allowed = dims.clone(); allowed.insert(&v.metric.metric_id); if let Some(m) = &v.secondary_metric { allowed.insert(&m.metric_id); }
         let mut unique = HashSet::new();
-        if table.version != 1 || table.columns.is_empty() || table.columns.len() > 210 || table.columns.iter().any(|c| !allowed.contains(c.as_str()) || !unique.insert(c)) || table.sort.as_ref().map_or(false, |s| !allowed.contains(s.column_id.as_str()) || !["asc", "desc"].contains(&s.direction.as_str())) { return Err(invalid()); }
+        if table.columns.is_empty() || table.columns.len() > 210 || table.columns.iter().any(|c| !allowed.contains(c.as_str()) || !unique.insert(c)) { return Err(invalid()); }
+        let valid_sort = |s: &Sort| allowed.contains(s.column_id.as_str()) && ["asc", "desc"].contains(&s.direction.as_str());
+        match table.version {
+            1 if table.sorts.is_none() && table.group_by.is_none() && table.sort.as_ref().map_or(true, valid_sort) => (),
+            2 if table.sort.is_none() => {
+                let sorts = table.sorts.as_ref().ok_or_else(invalid)?;
+                let mut seen = HashSet::new();
+                if sorts.len() > 210 || sorts.iter().any(|s| !valid_sort(s) || !seen.insert(&s.column_id)) || table.group_by.as_ref().map_or(false, |g| !dims.contains(g.as_str()) || !table.columns.contains(g)) { return Err(invalid()); }
+            },
+            _ => return Err(invalid()),
+        }
     }
     Ok(doc)
 }
@@ -153,4 +177,43 @@ pub fn restore_cumulative_default(connection: &Connection) -> Result<usize> {
     parse(raw.clone())?;
     connection.execute("INSERT INTO f1_saved_models VALUES (?1,?2,?3)", rusqlite::params![id, revision, raw.to_string()]).map_err(|e| e.to_string())?;
     Ok(1)
+}
+
+#[cfg(test)]
+mod table_v2_tests {
+    use super::*;
+    #[test]
+    fn synthetic_models_roundtrip_and_reject_invalid_sorting() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE f1_saved_models (id TEXT PRIMARY KEY, revision TEXT NOT NULL, document TEXT NOT NULL)").unwrap();
+        let old = json!({"documentVersion":2,"kind":"model","id":"old","revision":null,"title":"Old","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"table","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false,"table":{"version":1,"columns":["round","season","points"],"sort":{"columnId":"points","direction":"desc"}}},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved_old = save(&mut db, old.clone(), None, true).unwrap();
+        for aggregation in ["sum", "mean", "min", "max"] {
+            let mut candidate = old.clone();
+            candidate["visualization"]["metric"]["aggregation"] = json!(aggregation);
+            assert!(parse(candidate).is_ok());
+        }
+        for version in [2, 3] {
+            let mut summarized = old.clone();
+            summarized["id"] = json!(format!("summary-{version}"));
+            summarized["documentVersion"] = json!(version);
+            summarized["visualization"] = json!({"kind":"table","x":"driver","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":"season","runningSum":false});
+            summarized["filters"] = json!([{"fieldId":"round","op":"in","values":[2]}]);
+            let saved = save(&mut db, summarized, None, true).unwrap();
+            assert_eq!(load(&db, &format!("summary-{version}"), true).unwrap(), saved);
+        }
+        let mut modern = old;
+        modern["id"] = json!("new");
+        modern["visualization"]["table"] = json!({"version":2,"columns":["round","season","points"],"sorts":[{"columnId":"points","direction":"asc"},{"columnId":"round","direction":"desc"}],"groupBy":"season"});
+        modern["visualization"]["pie"] = json!({"version":1,"order":"desc","otherBelow":"4.000000000000000001","showLegend":false,"showLabels":true});
+        let saved_new = save(&mut db, modern.clone(), None, true).unwrap();
+        assert_eq!(load(&db, "old", true).unwrap(), saved_old);
+        assert_eq!(load(&db, "new", true).unwrap(), saved_new);
+        let mut bad_pie = modern.clone();
+        bad_pie["visualization"]["pie"]["otherBelow"] = json!("-1");
+        assert!(parse(bad_pie).is_err());
+        modern["id"] = json!("invalid");
+        modern["visualization"]["table"]["sorts"] = json!([{"columnId":"points","direction":"asc"},{"columnId":"points","direction":"desc"}]);
+        assert!(save(&mut db, modern, None, true).is_err());
+    }
 }

@@ -29,6 +29,7 @@ test('profile UI routes round/visit crops after calculation, retains fourth dime
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
   const choose = async (label, value) => { const s = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === label)?.querySelector('select'); assert.ok(s, label); await act(async () => { s.value = value; s.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle(); };
   const click = async text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, text); await act(async () => b.click()); await settle(); };
+  const editModel = async () => { const b = document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]'); assert.ok(b); await act(async () => b.click()); await settle(); };
   const filter = async (field, value) => {
     const details = [...document.querySelectorAll('.rds-sb-quick-filter')].find(node => node.querySelector('summary').textContent.startsWith(field));
     assert.ok(details, field); await act(async () => details.querySelector('summary').click()); await settle();
@@ -42,6 +43,7 @@ test('profile UI routes round/visit crops after calculation, retains fourth dime
     await choose('Metric', '@calc:all-visits-v1');
     assert.equal(queries.at(-1).protocolVersion, 3);
     assert.deepEqual(queries.at(-1).window.partitionBy, ['plot', 'campaign']);
+    await click('Table');
     assert.equal(document.querySelectorAll('th').length, 5);
     const extra = [...document.querySelectorAll('.rds-sb-bindings fieldset label')].find(label => label.textContent === 'Visit').querySelector('input');
     assert.ok(extra.checked && extra.closest('fieldset').disabled);
@@ -61,12 +63,12 @@ test('profile UI routes round/visit crops after calculation, retains fourth dime
     const saved = await storeV3.modelsV3.load((await storeV3.modelsV3.list())[0].id);
     assert.equal(saved.documentVersion, 3);
     assert.deepEqual(saved.visualization.extraDimensions, ['phase']);
-    await click('Open');
+    await editModel();
     assert.equal(resolutions.at(-1).policy, 'latest');
     assert.equal(queries.at(-1).window.profileId, 'all-visits-v1');
     assert.equal(document.querySelectorAll('th').length, 5);
     chronology.delete(JSON.stringify(['2024', 1, 'z-prior']));
-    await click('Open');
+    await editModel();
     assert.ok(document.querySelector('[role=alert]').textContent.includes('complete, unambiguous chronology'));
     assert.equal(document.querySelector('tbody'), null);
     assert.ok([...document.querySelectorAll('button')].find(b => b.textContent === 'Save model').disabled);

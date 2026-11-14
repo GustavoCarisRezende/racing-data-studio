@@ -354,11 +354,24 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
     check(p.metricId === metric.metricId && metric.aggregation === 'sum' && p.axisFieldId === v.x, 'Incompatible calculation profile');
     check(dimensions.length === p.dimensions.length && p.dimensions.every(key => dimensions.includes(key)), 'Profile grain mismatch');
   }
+  if (v.pie !== undefined) {
+    const pie = object(v.pie); check(pie.version === 1, 'Unsupported pie configuration');
+    oneOf(pie.order, ['source', 'asc', 'desc']); bool(pie.showLegend); bool(pie.showLabels);
+    if (pie.otherBelow !== undefined) check(typeof pie.otherBelow === 'string' && isScalarOfType(pie.otherBelow, 'decimal') && !pie.otherBelow.startsWith('-'), 'Invalid pie threshold');
+  }
   if (v.table !== undefined) {
-    const table = object(v.table); check(table.version === 1, 'Unsupported table configuration'); ids(table.columns, 210); check(table.columns.length > 0, 'At least one visible column is required');
+    const table = object(v.table); check(table.version === 1 || table.version === 2, 'Unsupported table configuration'); ids(table.columns, 210); check(table.columns.length > 0, 'At least one visible column is required');
     const available = [...dimensions, ...selections.map(m => m.metricId)];
     check(table.columns.every(key => available.includes(key)), 'Table column not in query');
-    if (table.sort !== undefined) { const sort = object(table.sort); id(sort.columnId); check(available.includes(sort.columnId), 'Invalid table sort column'); oneOf(sort.direction, ['asc', 'desc']); }
+    if (table.version === 1) {
+      check(table.sorts === undefined && table.groupBy === undefined, 'Invalid table version');
+      if (table.sort !== undefined) { const sort = object(table.sort); id(sort.columnId); check(available.includes(sort.columnId), 'Invalid table sort column'); oneOf(sort.direction, ['asc', 'desc']); }
+    } else {
+      check(table.sort === undefined, 'Invalid table version'); array(table.sorts, 210);
+      const seen = new Set<string>();
+      for (const raw of table.sorts) { const sort = object(raw); id(sort.columnId); check(available.includes(sort.columnId) && !seen.has(sort.columnId as string), 'Invalid table sort column'); seen.add(sort.columnId as string); oneOf(sort.direction, ['asc', 'desc']); }
+      if (table.groupBy !== undefined) { id(table.groupBy); check(dimensions.includes(table.groupBy as string) && table.columns.includes(table.groupBy), 'Invalid table grouping'); }
+    }
   }
 }
 
@@ -368,7 +381,8 @@ function projectVisualization(v: VisualizationSpec): VisualizationSpec {
     ...(v.cumulativeScope ? { cumulativeScope: v.cumulativeScope } : {}),
     ...(v.extraDimensions ? { extraDimensions: [...v.extraDimensions] } : {}),
     ...(v.calculation ? { calculation: { version: 3, profileId: v.calculation.profileId } } : {}),
-    ...(v.table ? { table: { version: 1, columns: [...v.table.columns], ...(v.table.sort ? { sort: { columnId: v.table.sort.columnId, direction: v.table.sort.direction } } : {}) } } : {}) };
+    ...(v.pie ? { pie: { version: 1, order: v.pie.order, showLegend: v.pie.showLegend, showLabels: v.pie.showLabels, ...(v.pie.otherBelow !== undefined ? { otherBelow: v.pie.otherBelow } : {}) } } : {}),
+    ...(v.table ? { table: v.table.version === 1 ? { version: 1, columns: [...v.table.columns], ...(v.table.sort ? { sort: { columnId: v.table.sort.columnId, direction: v.table.sort.direction } } : {}) } : { version: 2, columns: [...v.table.columns], sorts: v.table.sorts.map(s => ({ columnId: s.columnId, direction: s.direction })), ...(v.table.groupBy ? { groupBy: v.table.groupBy } : {}) } } : {}) };
 }
 export function visualizationDimensions(v: VisualizationSpec): string[] {
   return [v.x, v.series, v.comparison, ...(v.extraDimensions ?? [])].filter((key): key is string => typeof key === 'string');
@@ -405,7 +419,7 @@ export function parseAnalysisDocument(input: unknown, d: DatasetDescriptor): Ana
   assertSelection(a.selection); check(a.selection.datasetId === d.id, 'Analysis selection mismatch');
   assertVisualization(a.visualization, d); assertFilters(a.filters, d); instant(a.createdAt); instant(a.updatedAt);
   const v = a.visualization;
-  check(['line', 'bar', 'table'].includes(v.kind) && v.secondaryMetric === undefined && v.table === undefined && v.cumulativeScope === undefined && v.extraDimensions === undefined && v.calculation === undefined, 'New configuration requires a v2/v3 model; v1 is never silently upgraded');
+  check(['line', 'bar', 'table'].includes(v.kind) && v.secondaryMetric === undefined && v.table === undefined && v.cumulativeScope === undefined && v.extraDimensions === undefined && v.calculation === undefined && v.pie === undefined, 'New configuration requires a v2/v3 model; v1 is never silently upgraded');
   validateConfiguration(d, a.selection, v, a.filters);
   // Project every nested wire object; never call an untrusted toJSON or persist extras.
   const selection = a.selection;

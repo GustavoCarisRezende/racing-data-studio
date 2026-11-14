@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { buildChartModel, buildQuery, defaultVisualization, makeModel } from '@rds/sandbox-core';
+import { parseModelDocument } from '@rds/sandbox-contracts';
+import { EChartsRenderer, toEChartsOption } from '@rds/sandbox-echarts';
+import { v2Fixture } from './v2-fixture.mjs';
+import { resolve } from './helpers.mjs';
+
+test('pie sorting and Other use exact decimal values, omit nulls, and persist without changing old models', async () => {
+  const { provider, descriptor: d, store } = v2Fixture();
+  const selection = await resolve(provider);
+  const base = { ...defaultVisualization(d), kind: 'pie' };
+  const q = buildQuery(d, selection, base, [], 'pie-options');
+  const r = await provider.query(q);
+  assert.ok(r.rows.length >= 6);
+  r.rows = r.rows.slice(0, 6);
+  r.totalRows = r.rows.length;
+  ['4', '0.1', '0.2', '3.999999999999999999', null, '7'].forEach((value, i) => { r.rows[i].values.harvest = value; });
+  const pie = { version: 1, order: 'asc', otherBelow: '4', showLegend: false, showLabels: false };
+  const model = buildChartModel(d, q, r, 'pie', 'en-US', 'Synthetic', pie);
+  assert.equal(model.omitted, 1);
+  assert.deepEqual(model.slices.map(s => s.exactValue), ['4', '7', '4.299999999999999999']);
+  assert.equal(model.slices.at(-1).label, 'Other');
+  assert.equal(toEChartsOption(model).series[0].label.show, false);
+  assert.ok(!renderToStaticMarkup(createElement(EChartsRenderer, { model, locale: 'en-US' })).includes('Chart legend'));
+  const descending = buildChartModel(d, q, r, 'pie', 'pt-BR', 'Sintético', { ...pie, order: 'desc' });
+  assert.deepEqual(descending.slices.map(s => s.exactValue), ['7', '4', '4.299999999999999999']);
+  assert.equal(descending.slices.at(-1).label, 'Outros');
+  assert.throws(() => buildChartModel(d, q, r, 'pie', 'en-US', 'x', { ...pie, otherBelow: '-1' }));
+  const old = makeModel(d, [], base, [], 'Old');
+  assert.equal(parseModelDocument(old, d).visualization.pie, undefined);
+  const saved = await store.models.save(makeModel(d, [], { ...base, pie }, [], 'Synthetic'), null);
+  assert.deepEqual((await store.models.load(saved.id)).visualization.pie, pie);
+  assert.throws(() => parseModelDocument({ ...saved, visualization: { ...saved.visualization, pie: { ...pie, otherBelow: '01' } } }, d));
+});

@@ -111,7 +111,7 @@ impl F1Repository {
                 let root: serde_json::Value = serde_json::from_str(&page.payload)?;
                 let races = root.pointer("/MRData/RaceTable/Races").and_then(serde_json::Value::as_array).ok_or("Invalid calendar")?;
                 for race in races {
-                    calendar.push(serde_json::json!({"round":race["round"], "date":race["date"], "time":race.get("time"), "sprintDate":race.pointer("/Sprint/date"), "sprintTime":race.pointer("/Sprint/time")}));
+                    calendar.push(serde_json::json!({"round":race["round"], "raceName":race.get("raceName"), "date":race["date"], "time":race.get("time"), "sprintDate":race.pointer("/Sprint/date"), "sprintTime":race.pointer("/Sprint/time")}));
                 }
             }
             let mut results = Vec::new();
@@ -643,6 +643,7 @@ mod tests {
         repo.save(2024, &pages).unwrap();
         let snapshots = repo.analysis_snapshots().unwrap();
         let calendar = snapshots[0]["calendar"].as_array().unwrap();
+        assert_eq!(calendar[0]["raceName"], "Synthetic 1");
         assert_eq!(calendar[0]["time"], "15:00:00Z");
         assert_eq!(calendar[0]["sprintDate"], "2024-02-29");
         assert_eq!(calendar[0]["sprintTime"], "12:00:00Z");

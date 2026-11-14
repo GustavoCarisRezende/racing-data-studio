@@ -16,6 +16,9 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(document.getElementById('root'));
   const provider = syntheticF1();
+  let lastResult;
+  const query = provider.query;
+  provider.query = async (...args) => { const result = await query(...args); lastResult = result; return result; };
   const d = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
   const store = createMemoryStore(d);
   let model;
@@ -37,17 +40,17 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(button('Line').getAttribute('aria-pressed'), 'true');
     assert.equal(labels('Visualization type').length, 0);
     assert.equal(document.querySelectorAll('.rds-sb-result .rds-sb-bindings').length, 0);
-    assert.equal(document.querySelectorAll('tbody tr').length, 42);
+    assert.equal(lastResult.rows.length, 42);
     assert.equal(model.series.length, 3);
     assert.ok(model.series.some(s => s.label === 'Ana Lima · 2025'));
-    assert.ok(!document.querySelector('tbody').textContent.includes('ana_test'));
+    assert.ok(lastResult.rows.some(row => row.values.driver_name === 'Ana Lima'));
     assert.equal(document.querySelectorAll('.rds-sb-dataset-list button').length, 3);
     assert.ok(!document.body.textContent.includes('Moving average'));
 
     await openFilter('Drivers'); await checkName('Ana Lima');
-    assert.equal(document.querySelectorAll('tbody tr').length, 14);
+    assert.equal(lastResult.rows.length, 14);
     await checkName('Bruno Reis');
-    assert.equal(document.querySelectorAll('tbody tr').length, 28);
+    assert.equal(lastResult.rows.length, 28);
     const selected = [...document.querySelectorAll('.rds-sb-quick-filter[open] .rds-sb-facet input:checked')];
     assert.equal(selected.length, 2);
     assert.ok(document.querySelector('.rds-sb-quick-filter[open] .rds-sb-selection-summary').textContent.includes('Ana Lima'));
@@ -60,18 +63,18 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(model.series.length, 2);
 
     await click('Sprint results');
-    assert.equal(document.querySelectorAll('tbody tr').length, 6);
+    assert.equal(lastResult.rows.length, 6);
     assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'true');
     await openFilter('Rounds'); await checkName('4');
-    assert.equal(document.querySelectorAll('tbody tr').length, 2);
+    assert.equal(lastResult.rows.length, 2);
     await act(async () => document.querySelector('.rds-sb-quick-filter[open] .rds-sb-all').click()); await settle();
-    assert.equal(document.querySelectorAll('tbody tr').length, 6);
+    assert.equal(lastResult.rows.length, 6);
     await openFilter('Sessions'); await checkName('Race');
-    assert.equal(document.querySelectorAll('tbody tr').length, 28); // Race + Sprint aggregate once per round/driver.
+    assert.equal(lastResult.rows.length, 28); // Race + Sprint aggregate once per round/driver.
     assert.equal(model.series.find(series => series.label.includes('Ana Lima')).values[3], 26);
     assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'false');
     await checkName('Race');
-    assert.equal(document.querySelectorAll('tbody tr').length, 6);
+    assert.equal(lastResult.rows.length, 6);
     assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'true');
     await click('Race results');
     await openFilter('Season'); await checkName('2024');
@@ -79,7 +82,7 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(labels('Comparison selection').length, 0);
     assert.equal(model.series.length, 4);
     assert.ok(model.series.some(s => s.label.includes('2024')));
-    assert.equal(document.querySelectorAll('tbody tr').length, 50); // local pagination, not query truncation
+    assert.ok(lastResult.rows.length > 50);
 
     const seriesControls = labels('Group by').map(label => label.querySelector('select'));
     assert.equal(seriesControls.length, 1);
@@ -89,12 +92,10 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     await choose(labels('Group by')[0].querySelector('select'), 'driver');
     await click('Bar'); assert.equal(model.kind, 'bar');
     await click('Line'); assert.equal(model.kind, 'line');
-    const preview = document.querySelector('.rds-sb-preview');
-    assert.ok(preview.open);
-    await act(async () => { preview.open = false; }); assert.equal(preview.open, false);
+    assert.equal(document.querySelector('.rds-sb-preview'), null);
     await click('Save model');
     assert.equal((await store.models.list()).length, 1);
-    await click('Open');
+    await act(async () => document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]').click()); await settle();
     assert.equal(model.series.length, 4);
     await openFilter('Season');
     assert.equal(selectedSeasons().length, 2);

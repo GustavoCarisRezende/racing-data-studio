@@ -4,6 +4,7 @@
   "description": "Only the local main window may access the F1 commands.",
   "windows": ["main"],
   "permissions": [
+    "allow-f1-export-text",
     "allow-f1-sync",
     "allow-f1-sync-status",
     "allow-f1-local-seasons",

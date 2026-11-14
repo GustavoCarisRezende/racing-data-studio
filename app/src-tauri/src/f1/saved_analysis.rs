@@ -51,7 +51,7 @@ fn timestamp(s: &str) -> bool {
     let days = match m { 1|3|5|7|8|10|12 => 31, 4|6|9|11 => 30, 2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29, 2 => 28, _ => 0 };
     d >= 1 && d <= days && number(11,13) < 24 && number(14,16) < 60 && number(17,19) < 60
 }
-fn decimal(s: &str) -> bool {
+pub(super) fn decimal(s: &str) -> bool {
     if s.len() > 100 || s.is_empty() { return false; }
     let s = s.strip_prefix('-').unwrap_or(s); let mut parts = s.split('.');
     let whole = parts.next().unwrap_or("");
@@ -94,7 +94,7 @@ fn validate(doc: &Document) -> Result<()> {
     let fields = ["season", "round", "session", "driver", "team"];
     let mut dims = HashSet::new();
     for x in std::iter::once(&v.x).chain(v.series.iter()).chain(v.comparison.iter()) { if !fields.contains(&x.as_str()) || !dims.insert(x.as_str()) { return Err(invalid()); } }
-    if !dims.contains("season") || !["table", "line", "bar"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |x| x != "season") || v.running_sum || !matches!((v.metric.metric_id.as_str(), v.metric.aggregation.as_str()), ("points", "sum") | ("observations", "count")) { return Err(invalid()); }
+    if !dims.contains("season") || !["table", "line", "bar"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |x| x != "season") || v.running_sum || !matches!((v.metric.metric_id.as_str(), v.metric.aggregation.as_str()), ("points", "sum" | "mean" | "min" | "max") | ("observations", "count")) { return Err(invalid()); }
     if doc.filters.len() > 30 { return Err(invalid()); }
     let mut filtered = HashSet::new();
     for f in &doc.filters {

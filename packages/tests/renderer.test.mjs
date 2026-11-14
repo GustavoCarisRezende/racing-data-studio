@@ -19,6 +19,15 @@ test('modular renderer disables animation and HTML tooltips, keeps gaps and expo
   assert.ok(!markup.includes('<script>'));
 });
 
+test('synthetic series have at least 60 distinct colors shared with the legend', () => {
+  const many = { ...model, series: Array.from({ length: 60 }, (_, i) => ({ id: `s${i}`, label: `Series ${i}`, values: [i, null] })) };
+  const option = toEChartsOption(many);
+  assert.equal(new Set(option.color.slice(0, 60)).size, 60);
+  const markup = renderToStaticMarkup(createElement(EChartsRenderer, { model: many, locale: 'en-US' }));
+  assert.equal((markup.match(/<li>/g) ?? []).length, 60);
+  assert.ok(markup.includes(`stroke="${option.color[59]}"`));
+});
+
 test('actual ECharts SVG SSR render escapes source strings without a browser, CDN, WASM or HTML', () => {
   const chart = echarts.init(null, null, { renderer: 'svg', ssr: true, width: 640, height: 340 });
   try {

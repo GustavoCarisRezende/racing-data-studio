@@ -1,5 +1,5 @@
-import { assertQuery, assertResult, assertVisualization, compareDecimal, configurationQuery, parseAnalysisDocument, parseModelDocument, parseModelDocumentV3, visualizationDimensions, SandboxError } from '@rds/sandbox-contracts';
-import type { AnalysisDocument, ChartKind, DatasetDescriptor, ExportArtifact, FieldDescriptor, Filter, LocalizedText, ModelDocument, QueryRequest, QueryResult, ResolvedSelection, SavedModelDocument, SavedModelDocumentV3, Scalar, TableConfiguration, VisualizationSpec } from '@rds/sandbox-contracts';
+import { assertQuery, assertResult, assertVisualization, compareDecimal, configurationQuery, isScalarOfType, parseAnalysisDocument, parseModelDocument, parseModelDocumentV3, visualizationDimensions, SandboxError } from '@rds/sandbox-contracts';
+import type { AnalysisDocument, ChartKind, DatasetDescriptor, ExportArtifact, FieldDescriptor, Filter, LocalizedText, ModelDocument, PieConfiguration, QueryRequest, QueryResult, ResolvedSelection, SavedModelDocument, SavedModelDocumentV3, Scalar, TableConfiguration, VisualizationSpec } from '@rds/sandbox-contracts';
 export { visualizationDimensions } from '@rds/sandbox-contracts';
 
 export function localize(text: LocalizedText, locale: string): string {
@@ -68,6 +68,15 @@ export function withRequiredDimensions(d: DatasetDescriptor, input: Visualizatio
     else return null;
   }
   return v;
+}
+/** Explicitly replace the table query grain; never sum already aggregated rows. */
+export function summarizeTableBy(d: DatasetDescriptor, input: VisualizationSpec, fieldId: string): VisualizationSpec | null {
+  const metric = d.metrics.find(m => m.id === input.metric.metricId);
+  const field = d.fields.find(f => f.id === fieldId);
+  if (input.kind !== 'table' || !metric || !field || field.role !== 'dimension' || field.availability === 'unavailable' || !metric.groupableBy.includes(fieldId)) return null;
+  const candidate = withRequiredDimensions(d, { ...input, x: fieldId, series: null, comparison: null, runningSum: false, calculation: undefined, cumulativeScope: undefined, extraDimensions: undefined, secondaryMetric: undefined, table: undefined });
+  if (!candidate) return null;
+  try { assertVisualization(candidate, d); return candidate; } catch { return null; }
 }
 export function chartAvailable(kind: ChartKind, d: DatasetDescriptor, v: VisualizationSpec): boolean {
   if (!d.capabilities.charts.includes(kind) || (kind !== 'table' && !d.capabilities.completeGroupedQueries)) return false;
@@ -140,14 +149,20 @@ export function logicalColumns(d: DatasetDescriptor, r: QueryResult) {
 }
 /** Stable, exact sorting of the entire returned result BEFORE UI pagination; nulls last. */
 export function tableRows(r: QueryResult, table?: TableConfiguration) {
-  const sort = table?.sort;
-  const column = r.columns.find(c => c.id === sort?.columnId);
-  if (!sort || !column) return r.rows;
+  const sorts = table?.version === 2 ? table.sorts : table?.sort ? [table.sort] : [];
+  const groupBy = table?.version === 2 ? table.groupBy : undefined;
+  const ordered = groupBy ? [{ columnId: groupBy, direction: sorts.find(s => s.columnId === groupBy)?.direction ?? 'asc' as const }, ...sorts.filter(s => s.columnId !== groupBy)] : sorts;
+  if (!ordered.length) return r.rows;
   return [...r.rows].sort((a, b) => {
-    const x = a.values[column.id]!, y = b.values[column.id]!;
-    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
-    const cmp = column.type === 'decimal' ? compareDecimal(String(x), String(y)) : column.type === 'datetime' ? Math.sign(Date.parse(String(x)) - Date.parse(String(y))) : x === y ? 0 : x < y ? -1 : 1;
-    return sort.direction === 'asc' ? cmp : -cmp;
+    for (const sort of ordered) {
+      const column = r.columns.find(c => c.id === sort.columnId);
+      if (!column) continue;
+      const x = a.values[column.id]!, y = b.values[column.id]!;
+      if (x === null || y === null) { if (x !== y) return x === null ? 1 : -1; continue; }
+      const cmp = column.type === 'decimal' ? compareDecimal(String(x), String(y)) : column.type === 'datetime' ? Math.sign(Date.parse(String(x)) - Date.parse(String(y))) : x === y ? 0 : x < y ? -1 : 1;
+      if (cmp) return sort.direction === 'asc' ? cmp : -cmp;
+    }
+    return 0;
   });
 }
 export function makeAnalysis(d: DatasetDescriptor, selection: ResolvedSelection, visualization: VisualizationSpec, filters: Filter[], title: string, previous?: AnalysisDocument): AnalysisDocument {
@@ -164,7 +179,8 @@ export interface ChartModel {
   yLabel: string;
   categories: { key: string; label: string }[];
   series: { id: string; label: string; values: (number | null)[]; points?: { id: string; label: string; value: [number, number] }[] }[];
-  slices?: { id: string; label: string; value: number }[];
+  slices?: { id: string; label: string; value: number; exactValue?: string }[];
+  piePresentation?: { showLegend: boolean; showLabels: boolean };
   omitted?: number;
 }
 function chartNumber(raw: Scalar): number | null {
@@ -173,8 +189,9 @@ function chartNumber(raw: Scalar): number | null {
   if (n !== null && (!Number.isFinite(n) || Math.abs(n) > Number.MAX_SAFE_INTEGER || (n === 0 && /[1-9]/.test(String(raw))))) throw new SandboxError('LIMIT_EXCEEDED', 'Metric outside chart numeric range');
   return n;
 }
-export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryResult, kind: Exclude<ChartKind, 'table'>, locale: string, title: string): ChartModel {
+export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryResult, kind: Exclude<ChartKind, 'table'>, locale: string, title: string, pie?: PieConfiguration): ChartModel {
   assertQuery(q, d); assertResult(r, q, d);
+  if (pie && (pie.version !== 1 || !['source', 'asc', 'desc'].includes(pie.order) || typeof pie.showLegend !== 'boolean' || typeof pie.showLabels !== 'boolean' || (pie.otherBelow !== undefined && (!isScalarOfType(pie.otherBelow, 'decimal') || pie.otherBelow.startsWith('-'))))) throw new SandboxError('INVALID_CONTRACT', 'Invalid pie configuration');
   if (!r.complete) throw new SandboxError('INCOMPLETE_RESULT', 'Incomplete results cannot be plotted');
   const xId = q.orderBy[0]?.fieldId;
   const x = d.fields.find(f => f.id === xId);
@@ -198,7 +215,8 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
     if (q.window || (kind === 'scatter' && q.metrics.length !== 2)) throw new SandboxError('INVALID_QUERY', 'Incompatible chart query');
     const measureLabel = (index: number) => { const selection = q.metrics[index]!; const m = d.metrics.find(m => m.id === selection.metricId)!; return `${localize(m.label, locale)}${m.unit ? ` (${m.unit})` : ''} · ${aggregateLabels[selection.aggregation]}`; };
     const model: ChartModel = { kind, title, description: title, xLabel: kind === 'scatter' ? measureLabel(1) : localize(x.label, locale), yLabel: measureLabel(0), categories: [], series: [], omitted: 0 };
-    const slices: NonNullable<ChartModel['slices']> = [];
+    const slices: (NonNullable<ChartModel['slices']>[number] & { exactValue: string })[] = [];
+    const others: string[] = [];
     const scatter = new Map<string, ChartModel['series'][number]>();
     for (const row of r.rows) {
       const y = chartNumber(row.values[metric.id]!);
@@ -206,7 +224,9 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
       if (kind === 'pie') {
         if (y !== null && y < 0) throw new SandboxError('NEGATIVE_PIE', 'Pie requires non-negative values; use a table or bar chart');
         if (y === null) { model.omitted!++; continue; }
-        slices.push({ id: row.id, label, value: y });
+        const exactValue = String(row.values[metric.id]);
+        if (pie?.otherBelow !== undefined && compareDecimal(exactValue, pie.otherBelow) < 0) others.push(exactValue);
+        else slices.push({ id: row.id, label, value: y, exactValue });
       } else {
         const numericX = chartNumber(row.values[q.metrics[1]!.metricId]!);
         if (numericX === null || y === null) { model.omitted!++; continue; }
@@ -217,9 +237,20 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
       }
     }
     if (kind === 'pie') {
+      if (pie?.order !== undefined && pie.order !== 'source') slices.sort((a, b) => compareDecimal(a.exactValue, b.exactValue) * (pie.order === 'asc' ? 1 : -1));
+      if (others.length) {
+        const scale = others.reduce((n, value) => Math.max(n, value.split('.')[1]?.length ?? 0), 0);
+        const total = others.reduce((n, value) => { const [whole, fraction = ''] = value.split('.'); return n + BigInt(whole + fraction.padEnd(scale, '0')); }, 0n);
+        const digits = total.toString().padStart(scale + 1, '0');
+        const exactValue = scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits;
+        if (!isScalarOfType(exactValue, 'decimal')) throw new SandboxError('LIMIT_EXCEEDED', 'Other total exceeds decimal precision limit');
+        let id = '__rds_other__'; while (r.rows.some(row => row.id === id)) id += '_';
+        slices.push({ id, label: locale.startsWith('pt') ? 'Outros' : 'Other', value: chartNumber(exactValue)!, exactValue });
+      }
       if (!slices.some(s => s.value > 0)) throw new SandboxError('EMPTY_PIE', 'Pie requires a positive total');
       if (slices.length > d.capabilities.maxSeries || slices.length > 100) throw new SandboxError('LIMIT_EXCEEDED', 'Too many slices; refine filters');
       model.slices = slices; model.series = slices.map(s => ({ id: s.id, label: s.label, values: [s.value] }));
+      if (pie) model.piePresentation = { showLegend: pie.showLegend, showLabels: pie.showLabels };
     } else model.series = [...scatter.values()];
     for (const s of model.series) if (model.series.some(other => other.id !== s.id && other.label === s.label)) {
       const original = s.label;
@@ -230,12 +261,20 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
     model.description = `${title}. ${model.xLabel}; ${model.yLabel}. ${locale.startsWith('pt') ? 'Valores ausentes omitidos' : 'Missing values omitted'}: ${model.omitted}.`;
     return model;
   }
+  // A category key can recur in different partitions with different labels (for
+  // example round 1 in two seasons). Never attach one partition's label to both.
+  const axisLabels = new Map<string, Set<string>>();
+  for (const row of r.rows) {
+    const key = JSON.stringify(row.values[x.id]);
+    const labels = axisLabels.get(key) ?? new Set<string>();
+    labels.add(displayDimension(x.id, row.values)); axisLabels.set(key, labels);
+  }
   for (const row of r.rows) {
     if (row.values[x.id] === null) throw new SandboxError('INVALID_QUERY', 'Missing X values require table view');
     const categoryKey = JSON.stringify(row.values[x.id]);
     if (!categoryIndices.has(categoryKey)) {
       categoryIndices.set(categoryKey, categories.length);
-      categories.push({ key: categoryKey, label: displayDimension(x.id, row.values) });
+      categories.push({ key: categoryKey, label: axisLabels.get(categoryKey)!.size === 1 ? displayDimension(x.id, row.values) : format(row.values[x.id]!, x.type) });
     }
     const seriesKey = JSON.stringify(groups.map(key => row.values[key]));
     let group = series.get(seriesKey);
@@ -267,5 +306,37 @@ export function exportResult(d: DatasetDescriptor, q: QueryRequest, r: QueryResu
   const manifest = { format: 'rds-query-export', version: 1, title, exportedAt: new Date().toISOString(), dataset: { id: d.id, schemaVersion: d.schemaVersion, semanticVersion: d.semanticVersion, grain: d.grain },
     sources: d.sources, limitations: d.limitations, metrics: q.metrics.map(m => ({ ...m, definition: d.metrics.find(x => x.id === m.metricId) })), query: q, warnings: r.warnings,
     csv: { encoding: 'UTF-8', delimiter: ',', nullValue: '', formulaProtection: 'Apostrophe prefixed to potentially executable string cells', exactNullsDistinguishable: false }, rowCount: r.rows.length };
+  return [{ name: `${d.id}.csv`, mediaType: 'text/csv;charset=utf-8', text: csv }, { name: `${d.id}.manifest.json`, mediaType: 'application/json', text: JSON.stringify(manifest, null, 2) }];
+}
+
+/** Export all filtered rows in displayed table order, never only the current page. */
+export function exportTableResult(d: DatasetDescriptor, q: QueryRequest, r: QueryResult, title: string, table: TableConfiguration | undefined, locale: string): ExportArtifact[] {
+  assertQuery(q, d); assertResult(r, q, d);
+  if (!r.complete) throw new SandboxError('INCOMPLETE_RESULT', 'Cannot export a partial result');
+  const logical = logicalColumns(d, r);
+  const available = r.columns.filter(c => logical.some(item => item.id === c.id) || table?.columns.includes(c.id));
+  const columns = table ? table.columns.map(id => {
+    const column = available.find(c => c.id === id);
+    if (!column) throw new SandboxError('INVALID_CONTRACT', 'Unknown export column');
+    return column;
+  }) : available;
+  if (!columns.length || new Set(columns.map(c => c.id)).size !== columns.length) throw new SandboxError('INVALID_CONTRACT', 'Invalid export columns');
+  if (table) {
+    const sorts = table.version === 1 ? table.sort ? [table.sort] : [] : table.version === 2 && Array.isArray(table.sorts) ? table.sorts : null;
+    if (!sorts || sorts.length > 210 || new Set(sorts.map(s => s.columnId)).size !== sorts.length || sorts.some(s => !r.columns.some(c => c.id === s.columnId) || !['asc', 'desc'].includes(s.direction)) || (table.version === 2 && table.groupBy !== undefined && (!q.dimensions.includes(table.groupBy) || !table.columns.includes(table.groupBy)))) throw new SandboxError('INVALID_CONTRACT', 'Invalid export ordering');
+  }
+  const quote = (text: string) => '"' + text.replaceAll('"', '""') + '"';
+  const safe = (value: string) => /^[\s\u0000-\u001f\u007f\uFEFF]*[=+\-@]|^[\t\r\n]/.test(value) ? `'${value}` : value;
+  const rows = tableRows(r, table);
+  const csv = [columns.map(c => quote(safe(localize(c.label, locale)))).join(','), ...rows.map(row => columns.map(column => {
+    const raw = row.values[column.id]!;
+    if (raw === null) return quote('');
+    const field = d.fields.find(f => f.id === column.id);
+    const label = field?.labelField ? row.values[field.labelField] : undefined;
+    const fixed = field?.valueLabels?.find(item => item.value === raw);
+    const text = typeof label === 'string' && label.trim() ? label : fixed ? localize(fixed.label, locale) : String(raw);
+    return quote(typeof label === 'string' && label.trim() || fixed || column.type === 'string' ? safe(text) : text);
+  }).join(','))].join('\r\n') + '\r\n';
+  const manifest = { format: 'rds-table-export', version: 1, title, exportedAt: new Date().toISOString(), dataset: { id: d.id, schemaVersion: d.schemaVersion, semanticVersion: d.semanticVersion, grain: d.grain }, sources: d.sources, limitations: d.limitations, metrics: q.metrics.map(m => ({ ...m, definition: d.metrics.find(x => x.id === m.metricId) })), query: q, table: table ?? null, warnings: r.warnings, csv: { encoding: 'UTF-8', delimiter: ',', nullValue: '', formulaProtection: 'Apostrophe prefixed to potentially executable text cells', exactNullsDistinguishable: false }, rowCount: rows.length };
   return [{ name: `${d.id}.csv`, mediaType: 'text/csv;charset=utf-8', text: csv }, { name: `${d.id}.manifest.json`, mediaType: 'application/json', text: JSON.stringify(manifest, null, 2) }];
 }

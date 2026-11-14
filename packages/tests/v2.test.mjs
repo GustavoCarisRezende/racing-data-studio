@@ -81,6 +81,11 @@ test('models: latest reopening, no snapshot payload, CAS create/update/delete, s
   assert.throws(() => parseModelDocument({ ...saved, binding: { ...saved.binding, token: 'pinned' } }, d));
   assert.throws(() => parseAnalysisDocument({ ...pinned, visualization: document.visualization }, d), /v2/);
   assert.throws(() => parseModelDocument({ ...saved, visualization: { ...v, table: { version: 2, columns: ['harvest'] } } }, d));
+  const tableV2 = { version: 2, columns: ['week', 'campaign', 'harvest'], sorts: [{ columnId: 'harvest', direction: 'asc' }, { columnId: 'week', direction: 'desc' }], groupBy: 'campaign' };
+  assert.deepEqual(parseModelDocument({ ...saved, visualization: { ...v, table: tableV2 } }, d).visualization.table, tableV2);
+  assert.throws(() => parseModelDocument({ ...saved, visualization: { ...v, table: { ...tableV2, sorts: [tableV2.sorts[0], tableV2.sorts[0]] } } }, d));
+  assert.throws(() => parseModelDocument({ ...saved, visualization: { ...v, table: { ...tableV2, groupBy: 'harvest' } } }, d));
+  assert.deepEqual(parseModelDocument(saved, d).visualization.table, document.visualization.table);
   assert.throws(() => parseModelDocument({ ...saved, visualization: { ...v, comparison: null } }, d), /grouping/);
   assert.throws(() => parseModelDocument({ ...saved, filters: [{ fieldId: 'campaign', op: 'in', values: ['2022', '2023', '2024', '2025'] }] }, d), /selections/);
   await assert.rejects(store.models.save(saved, null), e => e.code === 'CONFLICT');
@@ -113,6 +118,13 @@ test('exact stable table sorting before pagination, nulls last, and generic thre
   assert.deepEqual(tableRows(r, { version: 1, columns: ['n'], sort: { columnId: 'n', direction: 'desc' } }).map(r => r.id), ['0', '3', '2', '4', '1']);
   const large = { columns: r.columns, rows: Array.from({ length: 101 }, (_, i) => ({ id: String(i), values: { n: `${100 - i}.00` } })) };
   assert.equal(tableRows(large, { version: 1, columns: ['n'], sort: { columnId: 'n', direction: 'asc' } }).slice(0, 50)[0].id, '100');
+  const multi = { columns: [{ id: 'group', type: 'string' }, { id: 'n', type: 'decimal' }, { id: 'tie', type: 'integer' }], rows: [
+    { id: 'a', values: { group: 'B', n: '9007199254740993.00', tie: 1 } },
+    { id: 'b', values: { group: 'A', n: '9007199254740993.00', tie: 1 } },
+    { id: 'c', values: { group: 'A', n: '9007199254740993.00', tie: 2 } },
+    { id: 'd', values: { group: 'A', n: null, tie: 5 } },
+  ] };
+  assert.deepEqual(tableRows(multi, { version: 2, columns: ['group', 'n', 'tie'], groupBy: 'group', sorts: [{ columnId: 'n', direction: 'asc' }, { columnId: 'tie', direction: 'desc' }] }).map(r => r.id), ['c', 'b', 'd', 'a']);
 });
 
 test('a pre-capability pinned v1 document keeps its old grouping without silently adding a season', async () => {
