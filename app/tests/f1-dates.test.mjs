@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatDate, formatTimestamp } from '../src/categories/f1/dates.ts';
+import { formatDate, formatTimestamp, formatTimestampUtc } from '../src/categories/f1/dates.ts';
 
 test('pure calendar dates do not depend on system timezone', () => {
   const previous = process.env.TZ;
@@ -14,10 +14,14 @@ test('pure calendar dates do not depend on system timezone', () => {
   } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });
 
-test('timestamps display UTC with requested date order and preserve precision', () => {
-  assert.equal(formatTimestamp('2024-03-01T00:30:22.123Z', 'pt-BR'), '01/03/2024 00:30:22.123');
-  assert.equal(formatTimestamp('2024-03-01T00:30:22.123Z', 'en-US'), '2024/03/01 00:30:22.123');
-  assert.equal(formatTimestamp('2024-03-01T00:30:00+02:00', 'pt-BR'), '29/02/2024 22:30:00');
+test('system timestamps use the local timezone with requested date order and precision', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'America/Los_Angeles';
+    assert.equal(formatTimestamp('2024-03-01T00:30:22.123Z', 'pt-BR'), '29/02/2024 16:30:22.123');
+    assert.equal(formatTimestamp('2024-03-01T00:30:22.123Z', 'en-US'), '2024/02/29 16:30:22.123');
+    assert.equal(formatTimestamp('2024-03-01T00:30:00+02:00', 'pt-BR'), '29/02/2024 14:30:00');
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });
 
 test('invalid or missing inputs are handled without guessing', () => {
@@ -25,4 +29,13 @@ test('invalid or missing inputs are handled without guessing', () => {
   for (const input of ['2024-02-30T00:00:00Z', '2024-01-01T25:00:00Z', '2024-01-01T00:00:00', 'bad']) assert.equal(formatTimestamp(input, 'en-US'), input);
   assert.equal(formatDate(null, 'en-US'), '—');
   assert.equal(formatTimestamp(undefined, 'pt-BR'), '—');
+});
+
+test('source timestamps stay formatted in UTC regardless of system timezone', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'Pacific/Kiritimati';
+    assert.equal(formatTimestampUtc('2024-03-01T00:30:22.123Z', 'pt-BR'), '01/03/2024 00:30:22.123');
+    assert.equal(formatTimestampUtc('2024-03-01T00:30:00+02:00', 'pt-BR'), '29/02/2024 22:30:00');
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });

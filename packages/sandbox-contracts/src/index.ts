@@ -315,6 +315,8 @@ export interface AnalysisStore {
   /** Return unknown so imported/stored documents MUST be validated at the boundary. */
   load(id: string, signal?: AbortSignal): Promise<unknown>;
   save(document: AnalysisDocument, expectedRevision: string | null, signal?: AbortSignal): Promise<AnalysisDocument>;
+  /** Optional deletion of a legacy pinned analysis, with optimistic concurrency. */
+  delete?(id: string, expectedRevision: string, signal?: AbortSignal): Promise<void>;
 }
 export interface ExportArtifact { name: string; mediaType: string; text: string }
 export interface ImageExportArtifact { format: 'svg' | 'png' | 'jpeg'; bytes: Uint8Array }

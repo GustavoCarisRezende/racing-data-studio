@@ -17,8 +17,8 @@ export function formatDate(value: string | null | undefined, locale: Locale): st
   return dateParts(match[1], match[2], match[3], locale);
 }
 
-// Snapshot timestamps are instants. Always display them in UTC, independently
-// of the machine timezone; retain invalid input verbatim rather than guessing.
+// System timestamps are instants and are shown in the machine's local timezone.
+// Event/source dates are intentionally handled separately and are never converted.
 export function formatTimestamp(value: string | null | undefined, locale: Locale): string {
   if (!value) return '—';
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/i.exec(value);
@@ -26,7 +26,24 @@ export function formatTimestamp(value: string | null | undefined, locale: Locale
   if (match[7].toUpperCase() !== 'Z' && (Number(match[7].slice(1, 3)) > 23 || Number(match[7].slice(4, 6)) > 59)) return value;
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  if (date.getUTCFullYear() < 1 || date.getUTCFullYear() > 9999) return value;
+  if (date.getFullYear() < 1 || date.getFullYear() > 9999) return value;
+  const year = String(date.getFullYear()).padStart(4, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()].map((part) => String(part).padStart(2, '0')).join(':');
+  const millis = date.getMilliseconds();
+  return `${dateParts(year, month, day, locale)} ${time}${millis ? `.${String(millis).padStart(3, '0')}` : ''}`;
+}
+
+// Source-data timestamps remain in UTC; unlike system timestamps, do not
+// convert them to the machine timezone.
+export function formatTimestampUtc(value: string | null | undefined, locale: Locale): string {
+  if (!value) return '—';
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/i.exec(value);
+  if (!match || !validDate(Number(match[1]), Number(match[2]), Number(match[3])) || Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59) return value;
+  if (match[8].toUpperCase() !== 'Z' && (Number(match[8].slice(1, 3)) > 23 || Number(match[8].slice(4, 6)) > 59)) return value;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() < 1 || date.getUTCFullYear() > 9999) return value;
   const year = String(date.getUTCFullYear()).padStart(4, '0');
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');

@@ -42,6 +42,7 @@
 .rds-sb-facet label span { min-width:0; overflow-wrap:anywhere; }
 .rds-sb-facet small { margin-left:auto; color:#9dacbf; }
 .rds-sandbox input[type=checkbox] { width:16px; height:16px; flex:none; accent-color:#f22b53; margin:0; }
+.rds-sandbox input[type=radio] { width:16px; height:16px; min-height:0; padding:0; margin:0; flex:none; accent-color:#f22b53; }
 .rds-sandbox .rds-sb-selection-summary { margin:0; padding:0 9px 7px; color:#ffb3c2; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rds-sb-advanced { margin-top:13px; color:var(--sb-muted); font-size:11px; }
 .rds-sb-advanced>summary { padding:5px 0; }
@@ -67,6 +68,10 @@
 .rds-sandbox .rds-sb-title { margin:0 0 4px; font-size:0; }
 .rds-sandbox .rds-sb-title input { background:transparent; border:1px solid transparent; font-size:16px; font-weight:650; padding:3px 0; min-height:30px; }
 .rds-sandbox .rds-sb-title input:hover { border-bottom-color:#647186; }
+.rds-sb-title-row { display:flex; align-items:center; gap:8px; }
+.rds-sandbox .rds-sb-title-row .rds-sb-title { flex:1; min-width:0; }
+.rds-sandbox .rds-sb-title-edit { flex:none; }
+.rds-sandbox .rds-sb-models-button { width:100%; margin:0 0 12px; }
 .rds-sb-chart { margin:0; min-width:0; }
 .rds-sb-chart-surface { width:100%; height:310px; min-width:0; }
 .rds-sb-chart figcaption { margin-top:7px; }
@@ -126,7 +131,7 @@
 .rds-sb-column-editor input { width:auto; }
 .rds-sb-column-editor button { padding:4px 8px; }
 .rds-sb-models { margin:12px 0 18px; padding:12px; border:1px solid var(--sb-border); border-radius:8px; background:#111a23; }
-.rds-sb-models h3 { display:flex; gap:7px; align-items:center; }
+.rds-sandbox .rds-sb-models > h3 { display:flex; gap:7px; align-items:center; margin-bottom:16px; }
 .rds-sb-model-actions { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
 .rds-sb-models button { font-size:11px; }
 .rds-sb-model-tools,.rds-sb-views,.rds-sb-legacy { margin-top:10px; border-top:1px solid #303b48; padding-top:9px; }
@@ -147,6 +152,8 @@
 .rds-sb-config { align-items:start; }
 .rds-sb-confirm { position:sticky; top:12px; z-index:5; margin:8px; padding:20px; background:#242c3b; border:2px solid #ff7997; border-radius:8px; }
 .rds-sb-confirm button { margin:4px; }
+.rds-sb-dialog-actions { display:flex; justify-content:flex-end; gap:4px; }
 .rds-sb-modal-backdrop { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; background:rgba(0,0,0,.7); padding:20px; }
 .rds-sb-modal-backdrop .rds-sb-confirm { position:static; max-width:480px; width:100%; max-height:90vh; overflow:auto; margin:0; box-sizing:border-box; }
 .rds-sb-model-open { flex:1; min-width:0; text-align:left; overflow-wrap:anywhere; }
+@container (min-width: 750px) and (max-width: 1099px) { .rds-sb-config>.rds-sb-models-button { grid-column:1/-1; } }

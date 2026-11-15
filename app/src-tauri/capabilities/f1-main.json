@@ -13,6 +13,7 @@
     "allow-f1-analyses-list",
     "allow-f1-analysis-load",
     "allow-f1-analysis-save",
+    "allow-f1-analysis-delete",
     "allow-f1-models-list",
     "allow-f1-model-load",
     "allow-f1-model-save",
@@ -28,6 +29,7 @@
     "allow-f1-restore-snapshot",
     "allow-f1-copy-snapshot-events",
     "allow-f1-snapshot-rename",
+    "allow-f1-snapshot-activate",
     "allow-f1-snapshot-delete",
     "allow-open-github",
     "allow-toggle-fullscreen"

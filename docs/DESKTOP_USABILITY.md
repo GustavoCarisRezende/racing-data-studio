@@ -25,8 +25,35 @@
 
 ## Snapshots
 
+### Campos de resultados no sandbox
+
+Os resultados de corrida e sprint preservados nos snapshots também fornecem
+posição de largada, posição final na classificação e voltas completadas. O saldo
+de posições é calculado como largada menos posição final: positivo indica ganho
+líquido de posições, não uma contagem de ultrapassagens.
+
+Uma largada informada como zero não é uma posição válida para essa comparação;
+nesses casos, a posição de largada analítica e o saldo ficam desconhecidos.
+Valores ausentes permanecem nulos; zero voltas completadas é válido.
+Os JSONs originais são preservados e não é necessário consultar novos endpoints.
+Posições são referentes a cada sessão, não à classificação do campeonato.
+Posições e saldo oferecem média, mínimo e máximo, sem soma nem acumulado.
+Voltas também permitem soma. Ao unificar corrida e sprint, as agregações usam
+as ocorrências originais de ambas as sessões; não representam uma posição única
+do evento. Para posições, preferir tabela, linhas, barras ou dispersão: fatias
+de médias em pizza não representam partes de um total.
+
 O SQLite continua autoritativo. A migration 9 adiciona uma tabela separada de
 nomes visuais; não recria a tabela de páginas nem regrava documentos existentes.
+A migration 10 registra o snapshot ativo de cada temporada e inicialmente
+seleciona a versão de maior ID. “Tornar ativa” muda essa seleção sem copiar
+dados; o marcador verde “Ativa” não depende da ordem da lista. Consultas atuais
+usam essa seleção; referências fixas continuam usando seus IDs originais.
+
+Toda sincronização bem-sucedida cria e ativa uma versão nova, mesmo quando as
+páginas são idênticas. Nesse caso, a data de origem é preservada. As verificações
+contra redução de dados continuam comparando a versão mais recente armazenada,
+não uma versão histórica ativada pelo usuário.
 
 - Nomes são aparados, limitados a 80 caracteres e não aceitam caracteres de
   controle. A chave de comparação desconsidera diferenças de caixa e algumas
@@ -38,10 +65,9 @@ nomes visuais; não recria a tabela de páginas nem regrava documentos existente
   Restaurar e Excluir. A lixeira é a última opção, com rótulo acessível e sem
   texto visual adicional. O registro ocupa uma linha horizontal em telas largas
   e pode quebrar em telas menores. A exclusão exige confirmação modal.
-- O snapshot ativo e os referenciados por análises salvas não podem ser
-  excluídos. Documentos inválidos ou referências que não possam ser verificadas
-  bloqueiam a exclusão por segurança. Modelos que usam seleção latest não
-  representam uma referência fixa a um snapshot antigo.
+- O snapshot ativo não pode ser excluído. A trava baseada em análises legadas
+  foi removida; excluir uma versão referenciada por um registro legado pode
+  impedir a reabertura desse registro.
 - As verificações e a exclusão de páginas e snapshot ocorrem na mesma transação
   de escrita, sob os bloqueios cooperativos usados pela sincronização.
 - Renomear não altera IDs ou nomes de arquivos. Excluir não apaga cópias por
@@ -50,6 +76,17 @@ nomes visuais; não recria a tabela de páginas nem regrava documentos existente
   junto ao campo de edição, sem depender de detalhes técnicos ocultos.
 
 ## Janela e links
+
+O painel de modelos permite excluir registros atuais e análises legadas, com
+revisão otimista para evitar excluir uma versão alterada por outra operação.
+Após excluir ou cancelar a exclusão, volta à lista. “Nova visualização” inicia
+uma configuração desvinculada; alterações não salvas exigem confirmação.
+O nome é editado pelo ícone à direita do título e persistido ao salvar.
+
+Os instantes das operações do sistema são exibidos no fuso local do usuário,
+sem mudar os valores UTC armazenados. Datas e horários de eventos e dos dados
+das análises não são convertidos. Nos diálogos, a ação de confirmação vem à
+esquerda e a de cancelamento à direita.
 
 A janela Tauri inicia maximizada, não em tela cheia. F11 alterna a tela cheia
 total e restaura a maximização anterior. Chamadas simultâneas e repetição
@@ -81,5 +118,24 @@ swap e tempo no cgroup.
 - O teste nativo usou XWayland. Windows, macOS, o navegador externo real e o uso
   completo do aplicativo em Wayland nativo ainda precisam de verificação.
 
-Nenhum banco real do usuário foi modificado ou teve snapshots excluídos durante
-essas verificações.
+As verificações automatizadas usam dados isolados. Separadamente, por solicitação
+explícita do usuário, os dados locais do aplicativo foram apagados para reiniciar
+os testes de desenvolvimento.
+
+## Reset local exclusivo de desenvolvimento (Linux)
+
+Com o aplicativo fechado:
+
+```sh
+python3 -B scripts/reset-local-data.py         # prévia, não apaga
+python3 -B scripts/reset-local-data.py --yes   # exclusão permanente
+python3 -B -m unittest discover -s scripts/tests -v
+```
+
+O script remove somente os diretórios `org.racingdatastudio.app` em
+`XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` e `XDG_STATE_HOME` (ou seus
+locais padrão no diretório do usuário). Isso inclui banco SQLite, snapshots,
+modelos, preferências, cópias por evento e armazenamento do WebView.
+Não limpa outros aplicativos nem altera o código-fonte. Recusa diretórios-alvo
+simbólicos e execução enquanto detecta o processo nativo aberto. Não é importado
+pelo frontend nem faz parte dos recursos da build; serve apenas ao desenvolvimento.

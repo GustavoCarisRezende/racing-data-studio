@@ -4,7 +4,7 @@ import car from '../../assets/formula-car.svg';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Explore, type Details } from './explore';
-import { formatTimestamp } from './dates';
+import { formatTimestamp, formatTimestampUtc } from './dates';
 import { nextTabIndex } from './tabs';
 import { snapshotErrorMessageKey } from './snapshot-errors';
 import { SnapshotActions } from './snapshot-actions';
@@ -12,7 +12,7 @@ import { SyncYearPicker } from './sync-year-picker';
 
 type LocalSeason = { year: number; importedAt: string | null; dataAt: string | null };
 type Progress = { year: number; phase: string; offset: number };
-type Snapshot = { id: number; name?: string | null; displayName?: string | null; canDelete?: boolean; deleteReason?: string | null; importedAt: string; dataAt: string };
+type Snapshot = { id: number; name?: string | null; displayName?: string | null; isActive: boolean; canDelete?: boolean; deleteReason?: string | null; importedAt: string; dataAt: string };
 type View = 'sandbox' | 'explore' | 'sync' | 'snapshots' | 'source';
 const views: View[] = ['sandbox', 'explore', 'sync', 'snapshots', 'source'];
 const AnalysisScreen = lazy(() => import('./analysis-screen'));
@@ -30,7 +30,7 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
   const wasRunning = useRef(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
-  const [errorKind, setErrorKind] = useState<'sync' | 'restore' | 'copy'>('sync');
+  const [errorKind, setErrorKind] = useState<'sync' | 'restore' | 'copy' | 'activate'>('sync');
   const [copied, setCopied] = useState<number | null>(null);
   const [localError, setLocalError] = useState('');
   const [details, setDetails] = useState<Details | null>(null);
@@ -38,6 +38,7 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
   const [view, setView] = useState<View | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [pendingDelete, setPendingDelete] = useState<Snapshot | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<Snapshot | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshotError, setSnapshotError] = useState<{ snapshotId: number; operation: 'rename' | 'delete'; message: MessageKey } | null>(null);
@@ -52,9 +53,9 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
 
   useEffect(() => {
     const dialog = deleteDialog.current;
-    if (pendingDelete && dialog && !dialog.open) dialog.showModal();
-    else if (!pendingDelete && dialog?.open) dialog.close();
-  }, [pendingDelete]);
+    if ((pendingDelete || pendingRestore) && dialog && !dialog.open) dialog.showModal();
+    else if (!pendingDelete && !pendingRestore && dialog?.open) dialog.close();
+  }, [pendingDelete, pendingRestore]);
 
   useEffect(() => {
     if (!desktop) { setCatalogState('fallback'); return; }
@@ -99,11 +100,16 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
     finally { setWorking(false); setProgress(null); setRevision((n) => n + 1); }
   }
   async function restore(id: number) {
-    if (!window.confirm(t('restoreConfirm'))) return;
     setWorking(true); setError(''); setErrorKind('restore');
-    try { await invoke('f1_restore_snapshot', { year, id }); setDetails(null); }
+    try { await invoke('f1_restore_snapshot', { year, id }); setDetails(null); setPendingRestore(null); }
     catch (e: unknown) { setError(String(e)); }
     finally { setWorking(false); setProgress(null); setRevision((n) => n + 1); }
+  }
+  async function activateSnapshot(snapshot: Snapshot) {
+    setWorking(true); setError(''); setErrorKind('activate');
+    try { await invoke('f1_snapshot_activate', { year, snapshotId: snapshot.id }); }
+    catch (e: unknown) { setError(String(e)); }
+    finally { setWorking(false); setRevision((n) => n + 1); }
   }
   async function copyEvents(id: number) {
     setWorking(true); setError(''); setCopied(null); setErrorKind('copy');
@@ -174,23 +180,24 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
              {(progress || working) && <p aria-live="polite">{progress ? `${local.some((entry) => entry.year === progress.year && entry.importedAt) ? t('updating') : t('importing')} ${progress.year}: ${phase} · ${progress.offset} ${t('offset')}` : t('loading')}</p>}
              <details className="sync-info" key={year}>
                <summary>{t('syncInfo')}</summary>
-               <p aria-live="polite">{!localLoaded ? t('loading') : imported ? `${t('imported')} · ${t('lastImport')}: ${formatTimestamp(selected?.importedAt, locale)}` : t('notImported')}</p>
+                <p aria-live="polite">{!localLoaded ? t('loading') : imported ? `${t('imported')} · ${t('lastImport')}: ${formatTimestamp(selected?.importedAt, locale)}` : t('notImported')}</p>
              </details>
            </>
          : <p aria-live="polite">{progress ? `${local.some((entry) => entry.year === progress.year && entry.importedAt) ? t('updating') : t('importing')} ${progress.year}: ${phase} · ${progress.offset} ${t('offset')}` : working ? t('loading') : imported ? `${t('imported')} · ${t('lastImport')}: ${formatTimestamp(selected?.importedAt, locale)}` : t('notImported')}</p>}
-        {error && <div className="sync-error" role="alert"><strong>{t(errorKind === 'sync' ? 'syncError' : errorKind === 'restore' ? 'restoreError' : 'copyError')}</strong><details><summary>{t('retryDetails')}</summary><pre>{error}</pre></details></div>}
+        {error && <div className="sync-error" role="alert"><strong>{t(errorKind === 'sync' ? 'syncError' : errorKind === 'restore' ? 'restoreError' : errorKind === 'activate' ? 'activateError' : 'copyError')}</strong><details><summary>{t('retryDetails')}</summary><pre>{error}</pre></details></div>}
       {view === 'explore' && <>{!imported && <p>{t('noLocal')}</p>}{imported && !details && !localError && <p>{t('loading')}</p>}{details && imported && selected?.dataAt && <Explore t={t} locale={locale} year={year} details={details} importedAt={selected.dataAt} />}</>}
-       {view === 'snapshots' && <><details className="snapshot-help"><summary>{t('snapshotHelpTitle')}</summary><p>{t('snapshotHelpDatabase')}</p><p>{t('snapshotHelpEvents')}</p><p>{t('snapshotHelpSafety')}</p></details>{copied !== null && <p role="status">{t('copySuccess')} {copied}</p>}{snapshots.length === 0 ? <p>{t('noSnapshots')}</p> : <ul className="snapshot-list">{snapshots.map((snapshot, index) => <li key={snapshot.id}>
-          <div className="snapshot-info"><strong>{snapshot.displayName || snapshot.name || `#${snapshot.id}`}</strong><span>#{snapshot.id} · {formatTimestamp(snapshot.importedAt, locale)} UTC{snapshot.dataAt !== snapshot.importedAt ? ` · ${t('sourceDataAt')}: ${formatTimestamp(snapshot.dataAt, locale)}` : ''}{index === 0 ? ` · ${t('activeSnapshot')}` : ''}{snapshot.deleteReason ? ` · ${deleteReasonText(snapshot.deleteReason)}` : ''}</span></div>
-          <SnapshotActions snapshot={snapshot} index={index} active={active} renaming={renaming === snapshot.id} snapshotName={snapshotName} snapshotError={snapshotError} t={t} deleteReasonText={deleteReasonText}
+       {view === 'snapshots' && <><details className="snapshot-help"><summary>{t('snapshotHelpTitle')}</summary><p>{t('snapshotHelpDatabase')}</p><p>{t('snapshotHelpEvents')}</p><p>{t('snapshotHelpSafety')}</p></details>{copied !== null && <p role="status">{t('copySuccess')} {copied}</p>}{snapshots.length === 0 ? <p>{t('noSnapshots')}</p> : <ul className="snapshot-list">{snapshots.map((snapshot) => <li key={snapshot.id}>
+          <div className="snapshot-info"><strong>{snapshot.displayName || snapshot.name || `#${snapshot.id}`}</strong><span>#{snapshot.id} · {formatTimestamp(snapshot.importedAt, locale)}{snapshot.dataAt !== snapshot.importedAt ? ` · ${t('sourceDataAt')}: ${formatTimestampUtc(snapshot.dataAt, locale)}` : ''}{snapshot.isActive && <span className="snapshot-active">{t('activeSnapshot')}</span>}{snapshot.deleteReason ? ` · ${deleteReasonText(snapshot.deleteReason)}` : ''}</span></div>
+           <SnapshotActions snapshot={snapshot} active={active} renaming={renaming === snapshot.id} snapshotName={snapshotName} snapshotError={snapshotError} t={t} deleteReasonText={deleteReasonText}
             onRename={() => { setSnapshotError(null); setRenaming(snapshot.id); setSnapshotName(snapshot.displayName || snapshot.name || ''); }}
             onNameChange={(value) => { setSnapshotName(value); if (snapshotError?.snapshotId === snapshot.id && snapshotError.operation === 'rename') setSnapshotError(null); }}
             onCancelRename={() => { setRenaming(null); setSnapshotName(''); setSnapshotError(null); }}
             onSaveRename={(event) => { event.preventDefault(); void renameSnapshot(snapshot); }}
-            onCopyEvents={() => void copyEvents(snapshot.id)} onRestore={() => void restore(snapshot.id)}
+            onCopyEvents={() => void copyEvents(snapshot.id)} onRestore={() => setPendingRestore(snapshot)}
+            onActivate={() => void activateSnapshot(snapshot)}
             onDelete={() => { setSnapshotError(null); setPendingDelete(snapshot); }} />
        </li>)}</ul>}
-       <dialog ref={deleteDialog} className="confirm-dialog" aria-labelledby="delete-snapshot-title" onCancel={(event) => { event.preventDefault(); if (!active) { setSnapshotError(null); setPendingDelete(null); } }}><h2 id="delete-snapshot-title">{t('deleteSnapshot')}</h2><p>{t('deleteSnapshotConfirm')}</p>{snapshotError?.operation === 'delete' && snapshotError.snapshotId === pendingDelete?.id && <p className="snapshot-inline-error" role="alert">{t(snapshotError.message)}</p>}<div><button type="button" disabled={active} onClick={() => { setSnapshotError(null); setPendingDelete(null); }}>{t('cancel')}</button><button className="danger" type="button" disabled={active} onClick={() => void deleteSnapshot()}>{t('deleteSnapshot')}</button></div></dialog>
+         <dialog ref={deleteDialog} className="confirm-dialog" aria-labelledby="snapshot-confirm-title" onCancel={(event) => { event.preventDefault(); if (!active) { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); } }}><h2 id="snapshot-confirm-title">{pendingRestore ? t('restore') : t('deleteSnapshot')}</h2><p>{pendingRestore ? t('restoreConfirm') : t('deleteSnapshotConfirm')}</p>{pendingRestore && errorKind === 'restore' && error && <p className="snapshot-inline-error" role="alert">{t('restoreError')} {error}</p>}{snapshotError?.operation === 'delete' && snapshotError.snapshotId === pendingDelete?.id && <p className="snapshot-inline-error" role="alert">{t(snapshotError.message)}</p>}<div><button className={pendingRestore ? '' : 'danger'} type="button" disabled={active} onClick={() => pendingRestore ? void restore(pendingRestore.id) : void deleteSnapshot()}>{pendingRestore ? t('restore') : t('deleteSnapshot')}</button><button type="button" disabled={active} onClick={() => { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); }}>{t('cancel')}</button></div></dialog>
        </>}
       </>}
       {localError && <div className="sync-error" role="alert">{t('loadError')} <details><summary>{t('retryDetails')}</summary><pre>{localError}</pre></details></div>}

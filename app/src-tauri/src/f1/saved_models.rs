@@ -52,7 +52,10 @@ struct Model {
     #[serde(skip_serializing_if = "Option::is_none")] save_data_selection: Option<bool>,
     created_at: String, updated_at: String,
 }
-fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as_str()), ("points", "sum" | "mean" | "min" | "max") | ("observations", "count")) }
+fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as_str()),
+    ("points" | "laps", "sum" | "mean" | "min" | "max") |
+    ("grid_position" | "finish_position" | "position_balance", "mean" | "min" | "max") |
+    ("observations", "count")) }
 fn parse(raw: Value) -> Result<Model> {
     let serialized = serde_json::to_string(&raw).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 || raw.get("revision").is_none() || raw.pointer("/visualization/series").is_none() || raw.pointer("/visualization/comparison").is_none() { return Err(invalid()); }
@@ -75,7 +78,9 @@ fn parse(raw: Value) -> Result<Model> {
     for d in std::iter::once(&v.x).chain(v.series.iter()).chain(v.comparison.iter()).chain(v.extra_dimensions.iter().flatten()) {
         if !["season", "round", "driver", "team", "session"].contains(&d.as_str()) || !dims.insert(d.as_str()) { return Err(invalid()); }
     }
-    if dims.len() > if doc.document_version == 3 { 5 } else { 3 } || !dims.contains("season") || !["table", "line", "bar", "pie", "scatter"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |s| s != "season") || !metric(&v.metric) || v.cumulative_scope.as_deref().map_or(false, |s| s != "filteredSelection") { return Err(invalid()); }
+    let position_metric = ["grid_position", "finish_position", "position_balance"].contains(&v.metric.metric_id.as_str())
+        || v.secondary_metric.as_ref().map_or(false, |m| ["grid_position", "finish_position", "position_balance"].contains(&m.metric_id.as_str()));
+    if dims.len() > if doc.document_version == 3 { 5 } else { 3 } || !dims.contains("season") || (position_metric && !dims.contains("session")) || !["table", "line", "bar", "pie", "scatter"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |s| s != "season") || !metric(&v.metric) || v.cumulative_scope.as_deref().map_or(false, |s| s != "filteredSelection") { return Err(invalid()); }
     match &v.calculation {
         Some(c) => {
             let expected = match c.profile_id.as_str() {
@@ -200,6 +205,12 @@ mod table_v2_tests {
             candidate["visualization"]["metric"]["aggregation"] = json!(aggregation);
             assert!(parse(candidate).is_ok());
         }
+        let mut position_model = old.clone();
+        position_model["id"] = json!("position-model");
+        position_model["visualization"] = json!({"kind":"table","x":"session","metric":{"metricId":"grid_position","aggregation":"mean"},"series":"driver","comparison":"season","runningSum":false});
+        position_model["filters"] = json!([{"fieldId":"grid_position_raw","op":"range","min":1,"max":20}]);
+        let saved_position = save(&mut db, position_model, None, true).unwrap();
+        assert_eq!(load(&db, "position-model", true).unwrap(), saved_position);
         for version in [2, 3] {
             let mut summarized = old.clone();
             summarized["id"] = json!(format!("summary-{version}"));

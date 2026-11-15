@@ -62,6 +62,55 @@ test('F1 point aggregations use decimal arithmetic, propagate nulls and round me
   }
 });
 
+test('F1 position and lap metrics validate source integers, preserve nulls and aggregate raw sessions', async () => {
+  const makeEntry = (round, session, driver, grid, position, laps) => ({
+    ...entry(round, session, driver, '0'), result: { ...entry(round, session, driver, '0').result, grid, position, laps },
+  });
+  const rows = [
+    makeEntry('1', 'results', 'a', '5', '2', '0'),
+    makeEntry('1', 'sprint', 'a', '3', '1', '10'),
+    makeEntry('1', 'sprint', 'b', '8', '4', '8'),
+    makeEntry('2', 'results', 'a', '0', '3', '12'),
+    makeEntry('3', 'results', 'a', undefined, null, null),
+    makeEntry('4', 'results', 'a', '20', '10', '1'),
+  ];
+  const provider = createProvider(async () => [snapshot(2024, '1', rows)]);
+  const descriptor = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
+  const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: descriptor.id, policy: 'latest', partitionIds: [] });
+  const baseQuery = { ...base(selection, descriptor), dimensions: ['season', 'round', 'session'], orderBy: [{ fieldId: 'round', direction: 'asc' }] };
+  const balance = { ...baseQuery, metrics: [{ metricId: 'position_balance', aggregation: 'mean' }] };
+  const balanceResult = await provider.query(balance);
+  contracts.assertResult(balanceResult, balance, descriptor);
+  assert.deepEqual(balanceResult.rows.map(row => row.values.position_balance), ['3.000000000000', '3.000000000000', null, null, '10.000000000000']);
+  assert.equal(balanceResult.columns.find(column => column.id === 'position_balance').type, 'decimal');
+
+  const gridRange = { ...baseQuery, metrics: [{ metricId: 'grid_position', aggregation: 'min' }], filters: [{ fieldId: 'grid_position_raw', op: 'range', min: 3, max: 8 }] };
+  const ranged = await provider.query(gridRange);
+  contracts.assertResult(ranged, gridRange, descriptor);
+  assert.deepEqual(ranged.rows.map(row => row.values.grid_position), [5, 3]);
+  const laps = { ...baseQuery, metrics: [{ metricId: 'laps', aggregation: 'min' }] };
+  const lapResult = await provider.query(laps);
+  assert.deepEqual(lapResult.rows.map(row => row.values.laps), [0, 8, 12, null, 1]);
+
+  const unified = { ...baseQuery, dimensions: ['season', 'round', 'session'], metrics: [{ metricId: 'grid_position', aggregation: 'mean' }], filters: [{ fieldId: 'session', op: 'in', values: ['results', 'sprint'] }], unifyEvents: true };
+  const unifiedResult = await provider.query(unified);
+  contracts.assertResult(unifiedResult, unified, descriptor);
+  // Raw occurrence average (5 + 3 + 8) / 3, not the mean of session means.
+  assert.equal(unifiedResult.rows.find(row => row.values.round === 1).values.grid_position, '5.333333333333');
+  const ordered = { ...baseQuery, metrics: [{ metricId: 'grid_position', aggregation: 'mean' }], orderBy: [{ fieldId: 'grid_position', direction: 'asc' }] };
+  const orderedResult = await provider.query(ordered);
+  assert.deepEqual(orderedResult.rows.map(row => row.values.grid_position), [null, null, '5.000000000000', '5.500000000000', '20.000000000000']);
+  const scatter = { kind: 'scatter', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, secondaryMetric: { metricId: 'grid_position', aggregation: 'mean' }, series: 'driver', comparison: 'season', extraDimensions: ['session'], runningSum: false };
+  contracts.assertVisualization(scatter, descriptor);
+  const scatterQuery = { ...baseQuery, dimensions: ['season', 'round', 'driver', 'session'], metrics: [scatter.metric, scatter.secondaryMetric] };
+  contracts.assertResult(await provider.query(scatterQuery), scatterQuery, descriptor);
+
+  const invalidSource = value => createProvider(async () => [snapshot(2024, '1', [makeEntry('1', 'results', 'a', value, '1', '1')])]).listDatasets();
+  for (const value of ['-1', '1.5', 'bad', 1]) await assert.rejects(invalidSource(value));
+  await assert.rejects(createProvider(async () => [snapshot(2024, '1', [makeEntry('1', 'results', 'a', '1', '-1', '1')])]).listDatasets());
+  await assert.rejects(createProvider(async () => [snapshot(2024, '1', [makeEntry('1', 'results', 'a', '1', '1', '-1')])]).listDatasets());
+});
+
 test('empty catalog and malformed source fail closed', async () => {
   assert.deepEqual(await createProvider(async () => []).listDatasets(), []);
   await assert.rejects(createProvider(async () => [snapshot(2024, '1', [entry('1', 'results', 'x', 'NaN')])]).listDatasets());

@@ -59,7 +59,7 @@ pub(super) fn decimal(s: &str) -> bool {
 }
 fn scalar(field: &str, v: &Value) -> bool {
     match field {
-        "round" => v.as_i64().map_or(false, |n| n.abs_diff(0) <= 9_007_199_254_740_991),
+        "round"|"grid_position_raw"|"finish_position_raw"|"position_balance_raw"|"laps_raw" => v.as_i64().map_or(false, |n| n.abs_diff(0) <= 9_007_199_254_740_991),
         "points_raw" => v.as_str().map_or(false, decimal),
         "season"|"session"|"driver"|"team" => v.as_str().map_or(false, |s| s.encode_utf16().count() <= 4000),
         _ => false,
@@ -94,7 +94,12 @@ fn validate(doc: &Document) -> Result<()> {
     let fields = ["season", "round", "session", "driver", "team"];
     let mut dims = HashSet::new();
     for x in std::iter::once(&v.x).chain(v.series.iter()).chain(v.comparison.iter()) { if !fields.contains(&x.as_str()) || !dims.insert(x.as_str()) { return Err(invalid()); } }
-    if !dims.contains("season") || !["table", "line", "bar"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |x| x != "season") || v.running_sum || !matches!((v.metric.metric_id.as_str(), v.metric.aggregation.as_str()), ("points", "sum" | "mean" | "min" | "max") | ("observations", "count")) { return Err(invalid()); }
+    let metric_allowed = matches!((v.metric.metric_id.as_str(), v.metric.aggregation.as_str()),
+        ("points" | "laps", "sum" | "mean" | "min" | "max") |
+        ("grid_position" | "finish_position" | "position_balance", "mean" | "min" | "max") |
+        ("observations", "count"));
+    let position_metric = ["grid_position", "finish_position", "position_balance"].contains(&v.metric.metric_id.as_str());
+    if !dims.contains("season") || (position_metric && !dims.contains("session")) || !["table", "line", "bar"].contains(&v.kind.as_str()) || (v.kind == "line" && !["season", "round"].contains(&v.x.as_str())) || v.comparison.as_deref().map_or(false, |x| x != "season") || v.running_sum || !metric_allowed { return Err(invalid()); }
     if doc.filters.len() > 30 { return Err(invalid()); }
     let mut filtered = HashSet::new();
     for f in &doc.filters {
@@ -102,14 +107,14 @@ fn validate(doc: &Document) -> Result<()> {
             Filter::In { field_id, values } => { if !fields.contains(&field_id.as_str()) || values.is_empty() || values.len() > 200 || !values.iter().all(|v| scalar(field_id, v)) { return Err(invalid()); } field_id },
             Filter::Contains { field_id, value } => { if !["season", "session", "driver", "team"].contains(&field_id.as_str()) || value.is_empty() || value.encode_utf16().count() > 300 { return Err(invalid()); } field_id },
             Filter::Range { field_id, min, max } => {
-                if !["round", "points_raw"].contains(&field_id.as_str()) || (min.is_none() && max.is_none()) || !min.iter().chain(max.iter()).all(|v| scalar(field_id, v)) { return Err(invalid()); }
+                if !["round", "points_raw", "grid_position_raw", "finish_position_raw", "position_balance_raw", "laps_raw"].contains(&field_id.as_str()) || (min.is_none() && max.is_none()) || !min.iter().chain(max.iter()).all(|v| scalar(field_id, v)) { return Err(invalid()); }
                 if let (Some(a), Some(b)) = (min, max) {
-                    let reversed = if field_id == "round" { a.as_i64() > b.as_i64() } else { decimal_cmp(a.as_str().ok_or_else(invalid)?, b.as_str().ok_or_else(invalid)?) == std::cmp::Ordering::Greater };
+                    let reversed = if field_id == "round" || field_id.ends_with("_raw") && field_id != "points_raw" { a.as_i64() > b.as_i64() } else { decimal_cmp(a.as_str().ok_or_else(invalid)?, b.as_str().ok_or_else(invalid)?) == std::cmp::Ordering::Greater };
                     if reversed { return Err(invalid()); }
                 }
                 field_id
             },
-            Filter::IsNull { field_id } | Filter::IsNotNull { field_id } => { if !["driver", "team", "points_raw"].contains(&field_id.as_str()) { return Err(invalid()); } field_id },
+            Filter::IsNull { field_id } | Filter::IsNotNull { field_id } => { if !["driver", "team", "points_raw", "grid_position_raw", "finish_position_raw", "position_balance_raw", "laps_raw"].contains(&field_id.as_str()) { return Err(invalid()); } field_id },
         };
         if !filtered.insert(field) { return Err(invalid()); }
     }
@@ -138,24 +143,6 @@ pub fn check_revisions(connection: &Connection, refs: &[Revision]) -> Result<()>
     Ok(())
 }
 
-/// Fail closed if any stored analysis is malformed or does not match its row identity.
-pub fn pinned_snapshot_references(connection: &Connection) -> Result<HashSet<(u16, i64)>> {
-    let mut stmt = connection.prepare("SELECT id, revision, document FROM f1_saved_analyses ORDER BY id LIMIT 1001").map_err(|_| invalid())?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).map_err(|_| invalid())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|_| invalid())?;
-    if rows.len() > 1000 { return Err(invalid()); }
-    let mut refs = HashSet::new();
-    for (id, revision, raw) in rows {
-        let value: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
-        let doc = parse(value)?;
-        if doc.id != id || doc.revision.as_deref() != Some(&revision) { return Err(invalid()); }
-        for r in doc.selection.revisions {
-            let year = r.partition_id.parse::<u16>().map_err(|_| invalid())?;
-            let snapshot_id = r.revision_id.parse::<i64>().map_err(|_| invalid())?;
-            refs.insert((year, snapshot_id));
-        }
-    }
-    Ok(refs)
-}
 fn parse(value: Value) -> Result<Document> {
     let serialized = serde_json::to_string(&value).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 { return Err(invalid()); }
@@ -178,6 +165,35 @@ pub fn save(connection: &mut Connection, value: Value, expected: Option<String>)
     let serialized = serde_json::to_string(&value).map_err(|_| invalid())?;
     tx.execute("INSERT INTO f1_saved_analyses(id, revision, document) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, document = excluded.document", rusqlite::params![doc.id, revision, serialized]).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?; Ok(value)
+}
+pub fn delete(connection: &mut Connection, id_value: &str, expected: &str) -> Result<()> {
+    if !id(id_value) || expected.len() != 32 || !expected.bytes().all(|c| c.is_ascii_hexdigit()) { return Err(invalid()); }
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    let previous: Option<String> = tx.query_row("SELECT revision FROM f1_saved_analyses WHERE id=?1", [id_value], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+    match previous {
+        None => return Err("REVISION_MISSING".into()),
+        Some(revision) if revision != expected => return Err("CONFLICT".into()),
+        _ => (),
+    }
+    if tx.execute("DELETE FROM f1_saved_analyses WHERE id=?1 AND revision=?2", rusqlite::params![id_value,expected]).map_err(|e| e.to_string())? != 1 { return Err("CONFLICT".into()); }
+    tx.commit().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use super::*;
+    #[test]
+    fn legacy_delete_requires_matching_revision_and_preserves_other_records() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE f1_saved_analyses(id TEXT PRIMARY KEY, revision TEXT, document TEXT);").unwrap();
+        let revision = "0123456789abcdef0123456789abcdef";
+        db.execute("INSERT INTO f1_saved_analyses VALUES('old',?1,'legacy'),('other',?1,'preserved')", [revision]).unwrap();
+        assert_eq!(delete(&mut db, "old", "ffffffffffffffffffffffffffffffff"), Err("CONFLICT".into()));
+        assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_analyses", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        delete(&mut db, "old", revision).unwrap();
+        assert_eq!(delete(&mut db, "old", revision), Err("REVISION_MISSING".into()));
+        assert_eq!(db.query_row("SELECT document FROM f1_saved_analyses WHERE id='other'", [], |r| r.get::<_, String>(0)).unwrap(), "preserved");
+    }
 }
 pub fn load(connection: &Connection, id_value: &str) -> Result<Value> {
     if !id(id_value) { return Err(invalid()); }

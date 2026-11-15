@@ -1,7 +1,7 @@
 import { assertDataset, assertQuery, assertSelection, compareDecimal, isScalarOfType, SandboxError } from '@rds/sandbox-contracts';
 import type { DatasetDescriptor, FacetRequest, Filter, QueryRequest, ResolvedSelection, RevisionReference, SandboxDataProvider, Scalar, SelectionRequest } from '@rds/sandbox-contracts';
 
-type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; integrity?: { validatedEndpoints?: string[] }; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null } }[] };
+type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; integrity?: { validatedEndpoints?: string[] }; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null; grid?: unknown; position?: unknown; laps?: unknown } }[] };
 type Row = Record<string, Scalar>;
 const text = (fallback: string, pt: string) => ({ fallback, translations: { 'pt-BR': pt } });
 const dimensions = ['season', 'round', 'session', 'driver', 'team'];
@@ -21,10 +21,18 @@ export const descriptor: DatasetDescriptor = {
     { id: 'team_name', label: text('Team name', 'Nome da equipe'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: [], availability: 'partial' },
     { id: 'round_name', label: text('Round and event', 'Rodada e evento'), type: 'string', role: 'dimension', analyticalType: 'nominal', nullable: true, ordered: false, filters: [], availability: 'partial' },
     { id: 'points_raw', label: text('Reported points', 'Pontos informados'), type: 'decimal', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
+    { id: 'grid_position_raw', label: text('Starting position', 'Posição de largada'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
+    { id: 'finish_position_raw', label: text('Finish position', 'Posição final'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
+    { id: 'position_balance_raw', label: text('Positions gained', 'Saldo de posições'), description: text('Starting position minus finish position; positive values mean positions gained. Missing either source position remains null.', 'Posição de largada menos posição final; valores positivos indicam posições ganhas. Se uma das posições de origem estiver ausente, o saldo permanece nulo.'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
+    { id: 'laps_raw', label: text('Completed laps', 'Voltas completadas'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: true, ordered: true, filters: ['range', 'isNull', 'isNotNull'], availability: 'partial' },
     { id: 'occurrence_raw', label: text('Occurrence', 'Ocorrência'), type: 'integer', role: 'measure', analyticalType: 'quantitative', nullable: false, ordered: false, filters: [], availability: 'available' },
   ],
   metrics: [
     { id: 'points', label: text('Points', 'Pontos'), description: text('Source result points, not official championship standings. Missing values propagate. Means are rounded half away from zero to at least 12 fractional places, retaining source precision.', 'Pontos dos resultados da fonte; não são classificação oficial. Valores ausentes propagam. Médias são arredondadas para longe de zero em empates, com pelo menos 12 casas decimais e preservação da precisão da fonte.'), fieldId: 'points_raw', aggregations: ['sum', 'mean', 'min', 'max'], defaultAggregation: 'sum', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'propagate', additive: true, supportsRunningSum: true },
+    { id: 'grid_position', label: text('Starting position', 'Posição de largada'), description: text('Mean/minimum/maximum across source result occurrences, not an individual position. If race and sprint are explicitly unified, mean is across both sessions; raw occurrences are reaggregated.', 'Média/mínimo/máximo de ocorrências brutas, não uma posição individual. Se corrida e sprint forem unificadas explicitamente, a média considera ambas as sessões; as ocorrências brutas são reagrupadas.'), fieldId: 'grid_position_raw', aggregations: ['mean', 'min', 'max'], defaultAggregation: 'mean', groupableBy: dimensions, requiredDimensions: ['season', 'session'], nullPolicy: 'propagate', additive: false, supportsRunningSum: false },
+    { id: 'finish_position', label: text('Finish position', 'Posição final'), description: text('Mean/minimum/maximum across source result occurrences, not an individual position. If race and sprint are explicitly unified, mean is across both sessions; raw occurrences are reaggregated.', 'Média/mínimo/máximo de ocorrências brutas, não uma posição individual. Se corrida e sprint forem unificadas explicitamente, a média considera ambas as sessões; as ocorrências brutas são reagrupadas.'), fieldId: 'finish_position_raw', aggregations: ['mean', 'min', 'max'], defaultAggregation: 'mean', groupableBy: dimensions, requiredDimensions: ['season', 'session'], nullPolicy: 'propagate', additive: false, supportsRunningSum: false },
+    { id: 'position_balance', label: text('Positions gained', 'Saldo de posições'), description: text('Starting position minus finish position; positive values mean positions gained. Mean/minimum/maximum across occurrences, never an individual position; unified race/sprint values are reaggregated from raw occurrences.', 'Posição de largada menos posição final; valores positivos indicam posições ganhas. Média/mínimo/máximo de ocorrências, nunca uma posição individual; valores de corrida/sprint unificadas são reagrupados das ocorrências brutas.'), fieldId: 'position_balance_raw', aggregations: ['mean', 'min', 'max'], defaultAggregation: 'mean', groupableBy: dimensions, requiredDimensions: ['season', 'session'], nullPolicy: 'propagate', additive: false, supportsRunningSum: false },
+    { id: 'laps', label: text('Completed laps', 'Voltas completadas'), description: text('Reported completed laps; zero is a valid value. Means are calculated from source result occurrences.', 'Voltas completadas informadas; zero é um valor válido. As médias são calculadas sobre ocorrências brutas de resultados.'), fieldId: 'laps_raw', aggregations: ['sum', 'mean', 'min', 'max'], defaultAggregation: 'sum', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'propagate', additive: true, supportsRunningSum: false },
     { id: 'observations', label: text('Result occurrences', 'Ocorrências de resultado'), description: text('Number of source result occurrences.', 'Quantidade de ocorrências de resultado da fonte.'), fieldId: 'occurrence_raw', aggregations: ['count'], defaultAggregation: 'count', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'ignore', additive: false, supportsRunningSum: false },
   ],
   sources: [{ name: 'Jolpica F1', attribution: 'Jolpica F1 API contributors', license: 'CC BY-NC-SA 4.0', url: 'https://github.com/jolpica/jolpica-f1' }],
@@ -71,6 +79,35 @@ function sum(values: Scalar[]): string | null {
   const total = strings.reduce((n, v) => { const [whole, frac = ''] = v.replace(/^-/, '').split('.'); return n + (v.startsWith('-') ? -1n : 1n) * BigInt(whole + frac.padEnd(scale, '0')); }, 0n);
   const negative = total < 0n; const digits = (negative ? -total : total).toString().padStart(scale + 1, '0');
   return `${negative ? '-' : ''}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
+}
+
+function aggregateInteger(values: Scalar[], aggregation: 'sum' | 'mean' | 'min' | 'max'): Scalar {
+  if (values.some(value => value === null)) return null;
+  const numbers = values as number[];
+  if (aggregation === 'min' || aggregation === 'max') return numbers.reduce((a, b) => aggregation === 'min' ? Math.min(a, b) : Math.max(a, b));
+  const total = numbers.reduce((a, b) => a + BigInt(b), 0n);
+  if (aggregation === 'sum') {
+    const result = Number(total);
+    if (!Number.isSafeInteger(result)) throw new SandboxError('LIMIT_EXCEEDED', 'Integer aggregation exceeds safe range');
+    return result;
+  }
+  const count = BigInt(numbers.length);
+  const negative = total < 0n;
+  const absolute = negative ? -total : total;
+  const scale = 10n ** 12n;
+  const numerator = absolute * scale;
+  let quotient = numerator / count;
+  if (numerator % count * 2n >= count) quotient++;
+  const digits = quotient.toString().padStart(13, '0');
+  return `${negative && quotient !== 0n ? '-' : ''}${digits.slice(0, -12)}.${digits.slice(-12)}`;
+}
+
+function sourceInteger(value: unknown, positiveOnly = false): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || !/^(0|[1-9]\d*)$/.test(value)) throw new SandboxError('INVALID_CONTRACT', 'Invalid stored integer result');
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || (positiveOnly && parsed < 1)) throw new SandboxError('INVALID_CONTRACT', 'Invalid stored integer result');
+  return parsed;
 }
 
 /** Decimal strings only: never convert points to binary floating point for aggregation. */
@@ -120,13 +157,18 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       }
       for (const item of s.results) {
         const round = Number(item.round); const points = item.result.points ?? null;
+        const grid = sourceInteger(item.result.grid);
+        const finish = sourceInteger(item.result.position, true);
+        const laps = sourceInteger(item.result.laps);
+        const gridPosition = grid === 0 ? null : grid;
+        const positionBalance = gridPosition === null || finish === null ? null : gridPosition - finish;
         const driver = item.result.Driver?.driverId ?? null; const team = item.result.Constructor?.constructorId ?? null;
         if (!Number.isSafeInteger(s.year) || s.year < 1950 || s.year > 2100 || !/^\d+$/.test(item.round) || !Number.isSafeInteger(round) || round < 1 || !['results', 'sprint'].includes(item.session) || !isScalarOfType(points, 'decimal') || !isScalarOfType(driver, 'string') || !isScalarOfType(team, 'string')) throw new SandboxError('INVALID_CONTRACT', 'Invalid stored occurrence');
         const parts = [item.result.Driver?.givenName, item.result.Driver?.familyName];
         if (parts.some(value => value !== undefined && (typeof value !== 'string' || value.length > 200)) || (item.result.Constructor?.name !== undefined && (typeof item.result.Constructor.name !== 'string' || item.result.Constructor.name.length > 400))) throw new SandboxError('INVALID_CONTRACT', 'Invalid source display name');
         const driverName = parts.filter(Boolean).join(' ').trim();
         const teamName = item.result.Constructor?.name?.trim();
-        rows.push({ season: String(s.year), round, round_name: roundNames.get(round) ?? null, session: item.session, driver, driver_name: driverName || driver, team, team_name: teamName || team, points_raw: points, occurrence_raw: 1 });
+        rows.push({ season: String(s.year), round, round_name: roundNames.get(round) ?? null, session: item.session, driver, driver_name: driverName || driver, team, team_name: teamName || team, points_raw: points, grid_position_raw: gridPosition, finish_position_raw: finish, position_balance_raw: positionBalance, laps_raw: laps, occurrence_raw: 1 });
         if (rows.length > 100_000) throw new SandboxError('LIMIT_EXCEEDED', 'Too many occurrences');
       }
       }
@@ -217,7 +259,7 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
             if (timestamp == null || timestamp > now() || firstKnownTime >= timestamp) continue;
             const hasValidatedSessionData = data.integrity.get(season)?.has(session === 'sprint' ? 'sprint' : 'results');
             if (!hasValidatedSessionData || !eventRows.length) continue;
-            synthetic.push({ season, round, round_name: eventRows[0].round_name, session, driver, driver_name: driverRows.find(row => row.driver_name !== null)?.driver_name ?? driver, team: null, team_name: null, points_raw: '0', occurrence_raw: 0 });
+            synthetic.push({ season, round, round_name: eventRows[0].round_name, session, driver, driver_name: driverRows.find(row => row.driver_name !== null)?.driver_name ?? driver, team: null, team_name: null, points_raw: '0', grid_position_raw: null, finish_position_raw: null, position_balance_raw: null, laps_raw: null, occurrence_raw: 0 });
           }
         }
         sourceRows = [...data.rows, ...synthetic];
@@ -226,7 +268,12 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       let output = [...groups.entries()].map(([key, group], index) => {
         const values: Row = Object.fromEntries(q.dimensions.map(k => [k, group[0][k]]));
         for (const id of q.dimensions) { const label = descriptor.fields.find(f => f.id === id)?.labelField; if (label) values[label] = group.find(row => row[label] !== null)?.[label] ?? null; }
-        for (const m of q.metrics) values[m.metricId] = m.metricId === 'points' ? aggregatePoints(group.map(r => r.points_raw), m.aggregation as 'sum' | 'mean' | 'min' | 'max') : group.length;
+        for (const m of q.metrics) {
+          const metric = descriptor.metrics.find(item => item.id === m.metricId)!;
+          if (m.metricId === 'observations') values[m.metricId] = group.length;
+          else if (metric.fieldId === 'points_raw') values[m.metricId] = aggregatePoints(group.map(r => r[metric.fieldId]), m.aggregation as 'sum' | 'mean' | 'min' | 'max');
+          else values[m.metricId] = aggregateInteger(group.map(r => r[metric.fieldId]), m.aggregation as 'sum' | 'mean' | 'min' | 'max');
+        }
         return { id: String(index), values, key };
       });
       if (q.window) {
@@ -289,10 +336,12 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
           if (!q.window) {
             const rawGroup = rawGroups.get(key) ?? [];
             for (const metric of q.metrics) {
-              if (metric.metricId === 'points') {
-                values.points = aggregatePoints(rawGroup.map(row => row.points_raw), metric.aggregation as 'sum' | 'mean' | 'min' | 'max');
-              } else if (metric.metricId === 'observations') {
-                values.observations = rawGroup.length;
+              if (metric.metricId === 'observations') values.observations = rawGroup.length;
+              else {
+                const definition = descriptor.metrics.find(item => item.id === metric.metricId)!;
+                values[metric.metricId] = definition.fieldId === 'points_raw'
+                  ? aggregatePoints(rawGroup.map(row => row[definition.fieldId]), metric.aggregation as 'sum' | 'mean' | 'min' | 'max')
+                  : aggregateInteger(rawGroup.map(row => row[definition.fieldId]), metric.aggregation as 'sum' | 'mean' | 'min' | 'max');
               }
             }
           }
@@ -311,9 +360,9 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       }
       if (q.displayFilters?.length) output = output.filter(row => matches(row.values, q.displayFilters!));
       if (output.length > q.limit) throw new SandboxError('LIMIT_EXCEEDED', 'Refine filters');
-      output.sort((a, b) => { for (const o of q.orderBy) { const diff = o.fieldId === 'points' && a.values.points !== null && b.values.points !== null ? compareDecimal(String(a.values.points), String(b.values.points)) : cmp(a.values[o.fieldId], b.values[o.fieldId]); if (diff) return o.direction === 'asc' ? diff : -diff; } return a.key.localeCompare(b.key); });
+      output.sort((a, b) => { for (const o of q.orderBy) { const metric = q.metrics.find(item => item.metricId === o.fieldId); const decimal = o.fieldId === 'points' || metric?.aggregation === 'mean'; const diff = decimal && a.values[o.fieldId] !== null && b.values[o.fieldId] !== null ? compareDecimal(String(a.values[o.fieldId]), String(b.values[o.fieldId])) : cmp(a.values[o.fieldId], b.values[o.fieldId]); if (diff) return o.direction === 'asc' ? diff : -diff; } return a.key.localeCompare(b.key); });
       const columnIds = [...new Set([...q.dimensions.flatMap(id => [id, ...(descriptor.fields.find(f => f.id === id)?.labelField ? [descriptor.fields.find(f => f.id === id)!.labelField!] : [])]), ...q.metrics.map(m => m.metricId)])];
-      const columns = columnIds.map(id => { const f = descriptor.fields.find(x => x.id === id); const m = descriptor.metrics.find(x => x.id === id); return { id, label: (f ?? m)!.label, type: f?.type ?? (id === 'points' ? 'decimal' as const : 'integer' as const) }; });
+      const columns = columnIds.map(id => { const f = descriptor.fields.find(x => x.id === id); const m = descriptor.metrics.find(x => x.id === id); const aggregation = q.metrics.find(x => x.metricId === id)?.aggregation; const decimalMean = aggregation === 'mean'; return { id, label: (f ?? m)!.label, type: f?.type ?? (id === 'points' || decimalMean ? 'decimal' as const : 'integer' as const) }; });
       return { protocolVersion: q.protocolVersion, requestId: q.requestId, selectionToken: q.selection.token, columns, rows: output.map(({ id, values }) => ({ id, values })), complete: true, totalRows: output.length, warnings: [
           ...(q.window ? [{ code: 'OBSERVED_ONLY', message: text('Cumulative totals carry forward only for known past-session absences with validated endpoint integrity and results for other drivers. Unknown coverage/null points remain gaps; not official standings.', 'Acumulados são carregados apenas para ausências conhecidas em sessões passadas, com integridade validada do endpoint e resultados de outros pilotos. Cobertura desconhecida/pontos nulos permanecem lacunas; não é classificação oficial.') }] : []),
         ...(q.metrics.some(m => m.metricId === 'points' && m.aggregation === 'mean') ? [{ code: 'MEAN_ROUNDED', message: text('Means are rounded half away from zero to at least 12 decimal places, retaining source precision. Missing points propagate.', 'Médias são arredondadas para longe de zero em empates, com pelo menos 12 casas decimais e preservação da precisão da fonte. Pontos ausentes propagam.') }] : []),

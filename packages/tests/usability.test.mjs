@@ -129,7 +129,9 @@ test('real F1 + ECharts UI: unified models, no untouched-model prompts, clean pr
     await openModel('synthetic-teams');
     assert.equal(model.kind, 'pie');
     const count = confirmations.length;
-    await click('Saved models'); await click('Rename'); assert.equal(document.activeElement, document.querySelector('.rds-sb-title input'));
+    await act(async () => { document.querySelector('.rds-sb-title-edit').click(); });
+    await settle();
+    assert.ok(document.activeElement === document.querySelector('.rds-sb-title input'));
     assert.ok(!document.body.textContent.includes('Changes not yet saved'), 'focus/rename button alone does not change content');
     await setTitle('  Edited team model  '); await click('Save model'); await click('Confirm');
     assert.equal(document.querySelector('.rds-sb-title input').value, 'Edited team model');

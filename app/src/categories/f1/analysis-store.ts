@@ -52,5 +52,8 @@ export function createF1AnalysisStore(invoke: Invoke): AnalysisStore {
       if (!saved.revision || JSON.stringify({ ...saved, revision: null }) !== JSON.stringify({ ...parsed, revision: null })) throw new SandboxError('INVALID_CONTRACT', 'Store changed document');
       return saved;
     },
+    async delete(id: string, expectedRevision: string, signal?: AbortSignal) {
+      await call<void>(invoke, 'f1_analysis_delete', { id, expectedRevision }, signal);
+    },
   };
 }

@@ -23,7 +23,7 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
   const button = text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, `button ${text}`); return b; };
   const click = async text => { await act(async () => button(text).click()); await settle(); };
-  const cardAction = async (title, action) => { await click('Saved models'); const card = [...document.querySelectorAll('.rds-sb-model-card')].find(c => c.querySelector('.rds-sb-model-open').textContent === title); assert.ok(card, `card ${title}`); const target = [...card.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith(`${action}:`)); assert.ok(target, action); await act(async () => target.click()); await settle(); };
+  const cardAction = async (title, action) => { if (!document.querySelector('.rds-sb-models')) await click('Saved models'); const card = [...document.querySelectorAll('.rds-sb-model-card')].find(c => c.querySelector('.rds-sb-model-open').textContent === title); assert.ok(card, `card ${title}`); const target = [...card.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith(`${action}:`)); assert.ok(target, action); await act(async () => target.click()); await settle(); };
   try {
     await act(async () => root.render(createElement(Sandbox, { provider, store, host, ChartRenderer: Renderer }))); await settle();
     assert.equal(document.querySelectorAll('.rds-sb-result select').length, 0);
@@ -101,15 +101,87 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     await cardAction(saved.title, 'Delete model'); assert.ok(document.querySelector('[role=alertdialog]').textContent.includes('Delete model'));
     await click('Cancel'); assert.equal((await store.models.list()).length, 1);
     await cardAction(saved.title, 'Delete model'); await click('Confirm'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
-    await click('Save model'); await act(async () => [...document.querySelectorAll('[role=dialog] input[type=radio]')].at(-1).click()); await click('Confirm'); assert.equal((await store.models.list()).length, 2);
+    await click('Close'); await click('Save model'); await act(async () => [...document.querySelectorAll('[role=dialog] input[type=radio]')].at(-1).click()); await click('Confirm'); assert.equal((await store.models.list()).length, 2);
     // Select the newly created model (fresh revision) and delete only that record.
     const created = (await store.models.list()).find(m => m.id !== saved.id);
     await cardAction(created.title, 'Delete model'); await click('Confirm'); assert.equal((await store.models.list()).length, 1);
     assert.ok(dirtyEvents.includes(true) && dirtyEvents.includes(false));
     store.models.list = async () => { throw new Error('Injected list failure'); };
-    await click('Saved models'); await click('Refresh model list');
+    await click('Refresh model list');
     await click('Table');
     assert.ok(document.querySelector('.rds-sb-models [role=alert]'), 'list errors survive unrelated query updates');
+  } finally {
+    await act(async () => root.unmount()); dom.window.close();
+    for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }
+  }
+});
+
+test('legacy deletion is optional, revision guarded, and returns to the models list', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://fixture.invalid' });
+  const old = new Map();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) { old.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value }); }
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(document.getElementById('root'));
+  const { provider, store } = v2Fixture();
+  let items = [{ id: 'legacy-one', title: 'Legacy', revision: 'rev-1', updatedAt: '2024-01-01T00:00:00Z' }];
+  store.list = async () => items;
+  let deleted;
+  store.delete = async (id, revision) => { deleted = [id, revision]; items = []; };
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
+  const click = async text => { const button = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(button, text); await act(async () => button.click()); await settle(); };
+  try {
+    await act(async () => root.render(createElement(Sandbox, { provider, store }))); await settle();
+    await click('Saved models');
+    const remove = document.querySelector('[aria-label="Delete model: Legacy"]');
+    assert.equal(remove.disabled, false);
+    await act(async () => remove.click()); await settle();
+    assert.deepEqual([...document.querySelectorAll('[role=alertdialog] button')].map(b => b.textContent), ['Confirm', 'Cancel']);
+    await click('Cancel'); assert.ok(document.querySelector('.rds-sb-models')); assert.equal(deleted, undefined);
+    await act(async () => document.querySelector('[aria-label="Delete model: Legacy"]').click()); await settle();
+    await click('Confirm'); assert.deepEqual(deleted, ['legacy-one', 'rev-1']); assert.ok(document.querySelector('.rds-sb-models')); assert.ok(!document.querySelector('[aria-label="Delete model: Legacy"]'));
+  } finally {
+    await act(async () => root.unmount()); dom.window.close();
+    for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }
+  }
+});
+
+test('new visualization resets a saved configuration, with cancellable discard and title editing from view mode', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://fixture.invalid' });
+  const old = new Map();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) { old.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value }); }
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(document.getElementById('root'));
+  const { provider, store } = v2Fixture();
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
+  const click = async text => { const button = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(button, text); await act(async () => button.click()); await settle(); };
+  try {
+    await act(async () => root.render(createElement(Sandbox, { provider, store }))); await settle();
+    const originalTitle = document.querySelector('.rds-sb-title input').value;
+    await click('Save model');
+    assert.deepEqual([...document.querySelectorAll('[role=dialog] .rds-sb-dialog-actions button')].map(b => b.textContent), ['Confirm', 'Cancel']);
+    assert.ok([...document.querySelectorAll('[role=dialog] input[type=radio], [role=dialog] input[type=checkbox]')].every(input => input.parentElement.classList.contains('rds-sb-check')));
+    await click('Confirm');
+    await click('View mode');
+    const editTitle = document.querySelector('.rds-sb-title-edit');
+    assert.equal(editTitle.disabled, false);
+    await act(async () => editTitle.click()); await settle();
+    const input = document.querySelector('.rds-sb-title input');
+    assert.equal(input.readOnly, false);
+    assert.equal(document.activeElement, input);
+    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+    await act(async () => { setValue.call(input, 'Changed title'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
+    await click('Save model'); await click('Confirm');
+    assert.equal((await store.models.list())[0].title, 'Changed title');
+    await act(async () => { setValue.call(input, 'Unsaved title'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
+    await click('Saved models'); await click('New visualization');
+    assert.deepEqual([...document.querySelectorAll('[role=alertdialog] button')].map(b => b.textContent), ['Confirm', 'Cancel']);
+    await click('Cancel'); assert.ok(document.querySelector('.rds-sb-models')); assert.equal(input.value, 'Unsaved title');
+    await click('New visualization'); await click('Confirm');
+    assert.equal(document.querySelector('.rds-sb-title input').value, originalTitle);
+    assert.equal(document.querySelector('.rds-sb-title input').readOnly, false);
+    await click('Save model');
+    assert.equal(document.querySelectorAll('[role=dialog] input[type=radio]').length, 1, 'new visualization is not linked to the saved model');
+    assert.deepEqual([...document.querySelectorAll('[role=dialog] .rds-sb-dialog-actions button')].map(b => b.textContent), ['Confirm', 'Cancel']);
   } finally {
     await act(async () => root.unmount()); dom.window.close();
     for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }

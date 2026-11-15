@@ -179,6 +179,7 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .snapshot-info { min-width:0; display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
 .snapshot-info strong { overflow-wrap:anywhere; }
 .snapshot-info span { color:#bac4d1; font-size:13px; overflow-wrap:anywhere; }
+.snapshot-info .snapshot-active { color:#75dfa0; font-weight:700; }
 .snapshot-actions,.snapshot-actions form { display:flex; align-items:center; gap:8px; }
 .snapshot-actions { justify-content:flex-end; white-space:nowrap; }
 .snapshot-actions form { flex-wrap:wrap; }
