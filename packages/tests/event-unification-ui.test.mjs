@@ -45,6 +45,7 @@ test('event unification control follows explicit selections, queries and persist
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(120); }); };
   const click = async text => { const button = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(button, text); await act(async () => button.click()); await settle(); };
   const checkbox = () => [...document.querySelectorAll('.rds-sb-config label')].find(l => l.textContent === 'Unify events')?.querySelector('input');
+  const legendCheckbox = () => [...document.querySelectorAll('.rds-sb-config label')].find(l => l.textContent === 'Unify legends')?.querySelector('input');
   const facet = () => [...document.querySelectorAll('.rds-sb-quick-filter')].find(d => d.querySelector('summary').textContent.startsWith('Visit'));
   const selectVisit = async name => {
     const label = [...facet().querySelectorAll('.rds-sb-facet label')].find(l => l.querySelector('span').textContent === name);
@@ -58,6 +59,8 @@ test('event unification control follows explicit selections, queries and persist
     assert.equal(checkbox().closest('details').querySelector('summary').textContent, 'Chart behavior');
     assert.equal(checkbox().disabled, true, 'no explicit visit selection');
     assert.equal(checkbox().checked, true, 'new preference remains checked while ineligible');
+    assert.equal(legendCheckbox().checked, true);
+    await act(async () => legendCheckbox().click()); await settle();
     await act(async () => facet().querySelector('summary').click()); await settle();
     await selectVisit('Race');
     assert.equal(checkbox().disabled, true, 'one visit selected');
@@ -75,6 +78,8 @@ test('event unification control follows explicit selections, queries and persist
     await click('Save model'); await click('Confirm');
     const saved = await store.modelsV3.load((await store.modelsV3.list())[0].id);
     assert.equal(saved.visualization.unifyEvents, true);
+    assert.equal(saved.visualization.unifyLegends, false);
+    assert.equal(queries.at(-1).unifyLegends, undefined);
     await selectVisit('Sprint');
     assert.equal(checkbox().disabled, true);
     assert.equal(checkbox().checked, true, 'ineligible query retains the saved preference');
@@ -83,6 +88,7 @@ test('event unification control follows explicit selections, queries and persist
     await act(async () => document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]').click()); await settle();
     if (document.querySelector('[role="alertdialog"]')) await click('Confirm');
     assert.equal(checkbox().checked, true);
+    assert.equal(legendCheckbox().checked, false);
     assert.equal(queries.at(-1).unifyEvents, true);
     if (!facet().open) { await act(async () => facet().querySelector('summary').click()); await settle(); }
     await selectVisit('Sprint');

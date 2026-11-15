@@ -50,11 +50,39 @@ test('sandbox exports the isolated chart, not hidden series', async () => {
     const group = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === 'Group by').querySelector('select');
     await act(async () => { group.value = 'plot'; group.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
     const legend = [...document.querySelectorAll('.rds-sb-legend button')]; assert.ok(legend.length > 1);
-    const chosen = legend[0].textContent;
+    const chosen = legend[0].lastChild.textContent;
     await act(async () => legend[0].click()); await settle();
     await click('Export');
     await act(async () => [...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent === 'Export').click()); await settle();
     assert.equal(exported.model.series.length, 1); assert.equal(exported.model.series[0].label, chosen);
     assert.equal(exported.options.format, 'svg');
+  } finally { await act(async () => root.unmount()); dom.window.close(); for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; } }
+});
+
+test('separate series remain sorted and select driver IDs; unified swatches describe each season', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const old = new Map();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, SVGElement: dom.window.SVGElement, IS_REACT_ACT_ENVIRONMENT: true })) { old.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, value }); }
+  dom.window.HTMLCanvasElement.prototype.getContext = () => ({ measureText: text => ({ width: String(text).length * 7 }) });
+  const { createRoot } = await import('react-dom/client'); const root = createRoot(document.getElementById('root'));
+  const series = [{ id: 'b', label: 'Émile · 2025', dimensions: { driver: 'e' }, values: [2] }, { id: 'a', label: 'Ana · 2025', dimensions: { driver: 'a' }, values: [3] }, { id: 'c', label: 'Émile · 2024', dimensions: { driver: 'e' }, values: [4] }];
+  const model = { kind: 'line', title: 'T', description: 'T', xLabel: 'X', yLabel: 'Y', categories: [{ key: '1', label: '1' }], series };
+  let toggled; const selection = { fieldId: 'driver', referenceModel: model, options: [{ value: 'e', label: 'Émile' }, { value: 'a', label: 'Ana' }], selected: ['e'], disabled: false, onToggle: value => { toggled = value; } };
+  try {
+    await act(async () => root.render(createElement(EChartsRenderer, { model, locale: 'pt-BR', legendSelection: selection })));
+    let buttons = [...document.querySelectorAll('.rds-sb-legend button')];
+    assert.deepEqual(buttons.map(b => b.lastChild.textContent), ['Ana', 'Émile']);
+    assert.deepEqual([...buttons[1].querySelectorAll('g title')].map(t => t.textContent), ['Émile · 2025', 'Émile · 2024']);
+    assert.equal(buttons[1].querySelectorAll('g rect').length, 2);
+    await act(async () => root.render(createElement(EChartsRenderer, { model, locale: 'pt-BR', legendSelection: selection, unifyLegends: false })));
+    buttons = [...document.querySelectorAll('.rds-sb-legend button')];
+    assert.deepEqual(buttons.map(b => b.lastChild.textContent), ['Ana · 2025', 'Émile · 2024', 'Émile · 2025']);
+    assert.deepEqual(buttons.map(b => b.getAttribute('aria-pressed')), ['false', 'true', 'true']);
+    assert.match(buttons[1].getAttribute('aria-label'), /filtra todas/);
+    await act(async () => buttons[1].click()); assert.equal(toggled, 'e');
+    const { toEChartsOption, renderExportSvg } = await import('@rds/sandbox-echarts');
+    assert.deepEqual(toEChartsOption(model).series.map(s => s.name), series.map(s => s.label));
+    const svg = renderExportSvg(model, { showLegend: true, showLabels: true, locale: 'pt-BR' }).svg;
+    assert.ok(svg.lastIndexOf('Ana · 2025') < svg.lastIndexOf('Émile · 2024'));
   } finally { await act(async () => root.unmount()); dom.window.close(); for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; } }
 });

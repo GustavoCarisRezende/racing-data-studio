@@ -328,6 +328,7 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
   if (v.kind === 'line') check(d.fields.some(f => f.id === v.x && f.ordered), 'Line requires ordered axis');
   const metric = object(v.metric); id(metric.metricId); oneOf(metric.aggregation, aggregations); bool(v.runningSum);
   if (v.unifyEvents !== undefined) { bool(v.unifyEvents); check(!v.unifyEvents || !!d.capabilities.eventUnification, 'Unsupported event unification'); }
+  if (v.unifyLegends !== undefined) bool(v.unifyLegends);
   for (const key of ['series', 'comparison']) if (v[key] !== null) {
     id(v[key]); check(v[key] !== v.x && d.fields.some(f => f.id === v[key] && f.role === 'dimension' && f.availability !== 'unavailable'), 'Invalid grouping');
   }
@@ -385,6 +386,7 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
 function projectVisualization(v: VisualizationSpec): VisualizationSpec {
   return { kind: v.kind, x: v.x, metric: { metricId: v.metric.metricId, aggregation: v.metric.aggregation }, series: v.series, comparison: v.comparison, runningSum: v.runningSum,
     ...(v.unifyEvents !== undefined ? { unifyEvents: v.unifyEvents } : {}),
+    ...(v.unifyLegends !== undefined ? { unifyLegends: v.unifyLegends } : {}),
     ...(v.secondaryMetric ? { secondaryMetric: { metricId: v.secondaryMetric.metricId, aggregation: v.secondaryMetric.aggregation } } : {}),
     ...(v.cumulativeScope ? { cumulativeScope: v.cumulativeScope } : {}),
     ...(v.extraDimensions ? { extraDimensions: [...v.extraDimensions] } : {}),

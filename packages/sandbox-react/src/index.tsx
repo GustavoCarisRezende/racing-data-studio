@@ -17,7 +17,7 @@ import type { MessageKey, Translate } from './messages.js';
 export { translator } from './messages.js';
 export type { MessageKey, Translate } from './messages.js';
 
-export interface ChartRendererProps { model: ChartModel; locale: string; onVisibleModelChange?: (model: ChartModel) => void; legendSelection?: { fieldId: string; options: { value: Exclude<Scalar, null>; label: string }[]; selected: Exclude<Scalar, null>[]; disabled: boolean; onToggle: (value: Exclude<Scalar, null>) => void } }
+export interface ChartRendererProps { model: ChartModel; locale: string; unifyLegends?: boolean; onVisibleModelChange?: (model: ChartModel) => void; legendSelection?: { fieldId: string; referenceModel?: ChartModel; options: { value: Exclude<Scalar, null>; label: string }[]; selected: Exclude<Scalar, null>[]; disabled: boolean; onToggle: (value: Exclude<Scalar, null>) => void } }
 export interface SandboxProps {
   provider: SandboxDataProvider;
   store?: AnalysisStore;
@@ -25,7 +25,7 @@ export interface SandboxProps {
   locale?: string;
   messages?: Partial<Record<MessageKey, string>>;
   ChartRenderer?: ComponentType<ChartRendererProps>;
-  chartExporter?: (model: ChartModel, options: { format: ImageExportArtifact['format']; showLegend: boolean; showLabels: boolean }, signal?: AbortSignal) => Promise<ImageExportArtifact>;
+  chartExporter?: (model: ChartModel, options: { format: ImageExportArtifact['format']; showLegend: boolean; showLabels: boolean; locale?: string }, signal?: AbortSignal) => Promise<ImageExportArtifact>;
   /** Keep this object's identity stable. Changing it deliberately resolves a new view. */
   selection?: Omit<SelectionRequest, 'protocolVersion' | 'datasetId'>;
 }
@@ -274,6 +274,50 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     try { return { model: buildChartModel(session.descriptor, current.query, current.result, session.visualization.kind, locale, title, session.visualization.kind === 'pie' ? session.visualization.pie : undefined) }; }
     catch (e) { const code = e && typeof e === 'object' && 'code' in e ? e.code : ''; return { error: t(code === 'NEGATIVE_PIE' ? 'negativePie' : code === 'EMPTY_PIE' ? 'emptyPie' : code === 'LIMIT_EXCEEDED' ? session.visualization.kind === 'pie' ? 'tooManySlices' : 'chartLimit' : 'invalid') }; }
   }, [current, session, locale, title, t]);
+  // The reference excludes only the synchronized field. Never reuse it across
+  // datasets, revisions, other filters, visualization configurations or providers.
+  const legendContext = session && legendField ? JSON.stringify([session.descriptor, session.selection, session.visualization, session.filters.filter(f => f.fieldId !== legendField.id).map(f => f.op === 'in' ? { ...f, values: [...f.values].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) } : f).sort((a, b) => a.fieldId.localeCompare(b.fieldId)), locale]) : '';
+  const reference = useRef<{ provider: SandboxDataProvider; key: string; model: ChartModel } | null>(null);
+  const [fetchedReference, setFetchedReference] = useState<{ provider: SandboxDataProvider; key: string; model: ChartModel }>();
+  if (legendContext && !legendFilter && chart && 'model' in chart && chart.model) reference.current = { provider, key: legendContext, model: chart.model };
+  const completeReference = reference.current?.provider === provider && reference.current.key === legendContext ? reference.current.model : fetchedReference?.provider === provider && fetchedReference.key === legendContext ? fetchedReference.model : undefined;
+  const observed = useRef<{ provider: SandboxDataProvider; key: string; model: ChartModel } | null>(null);
+  if (observed.current?.provider !== provider || observed.current.key !== legendContext) observed.current = null;
+  for (const candidate of [completeReference, chart && 'model' in chart ? chart.model : undefined]) {
+    if (!candidate || !legendContext) continue;
+    if (!observed.current) observed.current = { provider, key: legendContext, model: candidate };
+    else {
+      const known = new Set(observed.current.model.series.map(series => series.id));
+      const added = candidate.series.filter(series => !known.has(series.id));
+      if (added.length) observed.current = { provider, key: legendContext, model: { ...observed.current.model, series: [...observed.current.model.series, ...added] } };
+    }
+  }
+  const referenceModel = observed.current?.model;
+  useEffect(() => {
+    if (!session || session.visualization.kind === 'table' || !legendField || !legendFilter || completeReference) return;
+    const controller = new AbortController();
+    try {
+      const query = buildQuery(session.descriptor, session.selection, session.visualization, session.filters.filter(f => f.fieldId !== legendField.id), `query-${crypto.randomUUID()}`, { legacyPinned: Boolean(session.saved && !session.model) });
+      void provider.query(query, controller.signal).then(result => {
+        assertResult(result, query, session.descriptor);
+        if (!controller.signal.aborted && result.complete && result.rows.length) {
+          const kind = session.visualization.kind;
+          if (kind === 'table') return;
+          const model = buildChartModel(session.descriptor, query, result, kind, locale, title, kind === 'pie' ? session.visualization.pie : undefined);
+          setFetchedReference({ provider, key: legendContext, model });
+        }
+      }).catch(() => {});
+    } catch { /* The normal query reports invalid configurations. */ }
+    return () => controller.abort();
+  }, [provider, legendContext, Boolean(legendFilter), Boolean(completeReference)]);
+  const emptyModel = useMemo<ChartModel | undefined>(() => {
+    if (!v || v.kind === 'table') return undefined;
+    return { kind: v.kind, title, description: referenceModel?.description ?? title, xLabel: '', yLabel: '', categories: [], series: [], ...(v.kind === 'pie' ? { slices: [], piePresentation: { showLegend: v.pie?.showLegend ?? true, showLabels: v.pie?.showLabels ?? true } } : {}) };
+  }, [referenceModel, v, title]);
+  const lastChart = useRef<{ provider: SandboxDataProvider; key: string; chart: typeof chart } | null>(null);
+  if (chart && legendContext) lastChart.current = { provider, key: legendContext, chart };
+  const displayedChart = chart ?? ((current?.result.complete && !current.result.rows.length || error) && legendFilter && emptyModel ? { model: emptyModel } : !current && !error && lastChart.current?.provider === provider && lastChart.current.key === legendContext ? lastChart.current.chart : null);
+  if (!chart && displayedChart && (current || error) && legendContext) lastChart.current = { provider, key: legendContext, chart: displayedChart };
 
   function update(patch: Partial<VisualizationSpec>, successNotice?: MessageKey) {
     if (!session) return;
@@ -415,7 +459,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   async function exportImage() {
     if (!host?.exportImage || !chartExporter || !complete || !chart || !('model' in chart) || !chart.model || working) return;
     const controller = new AbortController(); operation.current?.abort(); operation.current = controller; setWorking(true); setError('');
-    try { const visible = visibleChart.current; const file = await chartExporter(visible?.source === chart.model ? visible.visible : chart.model, { format: imageFormat, showLegend: imageLegend, showLabels: imageLabels }, controller.signal); if (!controller.signal.aborted) await host.exportImage(file, controller.signal); }
+    try { const visible = visibleChart.current; const file = await chartExporter(visible?.source === chart.model ? visible.visible : chart.model, { format: imageFormat, showLegend: imageLegend, showLabels: imageLabels, locale }, controller.signal); if (!controller.signal.aborted) await host.exportImage(file, controller.signal); }
     catch (e) { if (!controller.signal.aborted) setError(e && typeof e === 'object' && 'code' in e ? errorMessage(t, e) : t('imageExportFailed')); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
   }
@@ -468,7 +512,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
           {current?.result.rows.length === 0 && v?.kind !== 'table' && <p role="status">{t('noRows')}</p>}
           {chart && 'model' in chart && chart.model && chart.model.series.length > 12 && <p className="rds-sb-muted" role="note">{t('manySeries')}</p>}
           {chart && 'model' in chart && Boolean(chart.model?.omitted) && <p role="status">{t('omitted')}: {chart.model!.omitted}</p>}
-          {chart && ('error' in chart ? <p role="alert">{chart.error} {t('refineChart')}</p> : ChartRenderer && chart.model ? <figure className="rds-sb-chart"><ChartBoundary key={`${current?.query.requestId}-${locale}`} fallback={t('error')}><ChartRenderer model={chart.model} locale={locale} onVisibleModelChange={visible => { visibleChart.current = { source: chart.model!, visible }; }} legendSelection={legendField && session && legendFacets.page ? { fieldId: legendField.id, options: legendFacets.page.values.map(item => ({ value: item.value, label: fieldValueLabel(legendField, item.value, locale, item.label) })), selected: legendValues, disabled: !editing || working || querying || loading, onToggle: value => {
+          {displayedChart && ('error' in displayedChart ? <p role="alert">{displayedChart.error} {t('refineChart')}</p> : ChartRenderer && displayedChart.model ? <figure className="rds-sb-chart"><ChartBoundary key={`${legendContext}-${locale}`} fallback={t('error')}><ChartRenderer model={displayedChart.model} locale={locale} unifyLegends={v?.unifyLegends} onVisibleModelChange={visible => { visibleChart.current = { source: displayedChart.model!, visible }; }} legendSelection={legendField && session && legendFacets.page ? { fieldId: legendField.id, referenceModel, options: legendFacets.page.values.map(item => ({ value: item.value, label: fieldValueLabel(legendField, item.value, locale, item.label) })), selected: legendValues, disabled: !editing || working || querying || loading, onToggle: value => {
             if (!editing || working || querying || loading || !legendFacets.page?.values.some(item => item.value === value)) return;
             const selected = legendFilter?.op === 'in' ? legendFilter.values : [];
             const values = selected.includes(value) ? selected.filter(item => item !== value) : [...selected, value];
@@ -477,7 +521,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
             applyFilters([...session.filters.filter(f => f.fieldId !== legendField.id), ...(values.length ? [{ fieldId: legendField.id, op: 'in' as const, values }] : [])]);
           } } : undefined} /></ChartBoundary><figcaption>{t('chartHelp')}</figcaption></figure> : null)}
           {v?.kind === 'table' && current && d && <ResultTable descriptor={d} visualization={v} unifiedEvents={Boolean(current.query.unifyEvents)} result={current.result} configuration={v.table} onConfiguration={table => update({ table })} editable={editing} page={page} setPage={setPage} locale={locale} t={t} uid={`${uid}-main`} />}
-          {!current && !error && <div className="rds-sb-chart-placeholder">{loading || querying ? t('loading') : t('chooseDataset')}</div>}
+          {!current && !displayedChart && !error && <div className="rds-sb-chart-placeholder">{loading || querying ? t('loading') : t('chooseDataset')}</div>}
         </div>
         {d && session && <details className="rds-sb-provenance"><summary>{t('provenance')}</summary><p>{t('pinned')}</p><ul>{d.sources.map((source, i) => <li key={i}>{source.name} — {source.attribution} — {source.license}</li>)}</ul><h3>{t('revisions')}</h3><ul>{session.selection.revisions.map(r => <li key={r.partitionId}>{r.partitionId}: {r.revisionId} · {r.sourceDataAt ?? '—'}</li>)}</ul><p>{session.selection.transformationVersion}</p>{d.limitations.length > 0 && <><h3>{t('limitations')}</h3><ul>{d.limitations.map((limitation, i) => <li key={i}>{localize(limitation, locale)}</li>)}</ul></>}</details>}
       </section>
@@ -500,7 +544,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
               <p className="rds-sb-muted">{t('comparisonHint')}</p>
             </> : <label>{t('comparison')}<select disabled={working || Boolean(v.comparison && (metric.requiredDimensions?.includes(v.comparison) || d.capabilities.multiSelection?.fieldId === v.comparison || d.metrics.find(m => m.id === v.secondaryMetric?.metricId)?.requiredDimensions?.includes(v.comparison)))} value={v.comparison ?? ''} onChange={e => update({ comparison: e.target.value || null, ...(d.capabilities.maxDimensions < 3 ? { series: null } : {}) })}><option value="">{t('none')}</option>{dimensions.filter(f => (d.capabilities.comparisonDimensions.includes(f.id) || d.capabilities.multiSelection?.fieldId === f.id) && f.id !== v.x && f.id !== v.series && metric.groupableBy.includes(f.id) && (!v.secondaryMetric || d.metrics.find(m => m.id === v.secondaryMetric?.metricId)?.groupableBy.includes(f.id))).map(f => <option key={f.id} value={f.id}>{localize(f.label, locale)}</option>)}</select></label>}
           </details>}
-          {d.capabilities.eventUnification && <details className="rds-sb-config-section"><summary>{t('chartBehavior')}</summary><label className="rds-sb-check"><input type="checkbox" disabled={working || !eventUnificationAvailable(d, session.filters)} checked={Boolean(v.unifyEvents)} onChange={e => update({ unifyEvents: e.target.checked })} />{t('unifyEvents')}</label></details>}
+          <details className="rds-sb-config-section"><summary>{t('chartBehavior')}</summary>{d.capabilities.eventUnification && <label className="rds-sb-check"><input type="checkbox" disabled={working || !eventUnificationAvailable(d, session.filters)} checked={Boolean(v.unifyEvents)} onChange={e => update({ unifyEvents: e.target.checked })} />{t('unifyEvents')}</label>}<label className="rds-sb-check"><input type="checkbox" disabled={working} checked={v.unifyLegends !== false} onChange={e => update({ unifyLegends: e.target.checked })} />{t('unifyLegends')}</label></details>
         </>}
       </aside>}
     </div>

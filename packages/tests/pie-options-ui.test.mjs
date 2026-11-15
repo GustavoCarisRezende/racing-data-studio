@@ -37,12 +37,12 @@ test('pie controls save and reopen explicit settings with a synthetic store', as
     await act(async () => label('Include pie labels').querySelector('input').click()); await settle();
     assert.equal(label('Show slice labels').querySelector('input').checked, true, 'export options do not mutate the model');
     await act(async () => [...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent === 'Export').click()); await settle();
-    assert.deepEqual(exportedOptions, { format: 'png', showLegend: true, showLabels: false });
+    assert.deepEqual(exportedOptions, { format: 'png', showLegend: true, showLabels: false, locale: 'en-US' });
     assert.equal(savedImage.format, 'png');
     await click('Export');
     await act(async () => { const format = label('Image format').querySelector('select'); format.value = 'svg'; format.dispatchEvent(new dom.window.Event('change', { bubbles: true })); label('Include legend').querySelector('input').click(); });
     await act(async () => [...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent === 'Export').click()); await settle();
-    assert.deepEqual(exportedOptions, { format: 'svg', showLegend: false, showLabels: false });
+    assert.deepEqual(exportedOptions, { format: 'svg', showLegend: false, showLabels: false, locale: 'en-US' });
     assert.equal(savedImage.format, 'svg');
     await click('Save model'); await click('Confirm');
     const saved = await store.models.load((await store.models.list())[0].id);

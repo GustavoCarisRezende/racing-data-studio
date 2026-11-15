@@ -36,7 +36,7 @@ export const descriptor: DatasetDescriptor = {
   presentation: {
     primaryFilterFieldId: 'season',
     filters: [{ fieldId: 'driver', label: text('Drivers', 'Pilotos') }, { fieldId: 'team', label: text('Teams', 'Equipes') }, { fieldId: 'round', label: text('Rounds', 'Rodadas') }, { fieldId: 'session', label: text('Sessions', 'Sessões') }],
-    defaultVisualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', runningSum: false, unifyEvents: true },
+    defaultVisualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', runningSum: false, unifyEvents: true, unifyLegends: true },
   },
 };
 // Preserve legacy literal-ID text filter semantics; name search belongs to the faceted picker.

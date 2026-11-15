@@ -7,20 +7,21 @@ import type { Translate } from './messages.js';
 
 /** Stable request context: changing this field's own membership never resets its list. */
 export function useFacetOptions(provider: SandboxDataProvider, descriptor: DatasetDescriptor | undefined, selection: ResolvedSelection | undefined, field: FieldDescriptor | undefined, filters: Filter[], enabled = true, search = '') {
-  const signature = JSON.stringify(filters.filter(f => f.fieldId !== field?.id));
+  const signature = JSON.stringify(filters.filter(f => f.fieldId !== field?.id).map(f => f.op === 'in' ? { ...f, values: [...f.values].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) } : f).sort((a, b) => a.fieldId.localeCompare(b.fieldId)));
   const otherFilters = useMemo(() => filters.filter(f => f.fieldId !== field?.id), [signature, field?.id]);
-  const key = JSON.stringify([descriptor?.id, selection?.token, field?.id, signature, search]);
+  const key = JSON.stringify([descriptor, selection, field, signature, search]);
   const [pagination, setPagination] = useState<{ key: string; cursor: string }>();
   const cursor = pagination?.key === key ? pagination.cursor : undefined;
-  const [state, setState] = useState<{ key: string; page?: FacetPage; loading: boolean; error: boolean }>({ key: '', loading: false, error: false });
+  const [state, setState] = useState<{ provider?: SandboxDataProvider; key: string; page?: FacetPage; loading: boolean; error: boolean }>({ key: '', loading: false, error: false });
   const known = useRef(new Map<string, string>());
-  const identity = `${descriptor?.id}/${selection?.token}/${field?.id}`;
+  const identity = JSON.stringify([descriptor, selection, field, signature]);
   const lastIdentity = useRef(identity);
-  if (lastIdentity.current !== identity) { known.current = new Map(); lastIdentity.current = identity; }
+  const lastProvider = useRef(provider);
+  if (lastIdentity.current !== identity || lastProvider.current !== provider) { known.current = new Map(); lastIdentity.current = identity; lastProvider.current = provider; }
   useEffect(() => {
     if (!enabled || !provider.facet || !descriptor || !selection || !field) return;
     const controller = new AbortController();
-    setState(old => ({ key, page: old.key === key ? old.page : undefined, loading: true, error: false }));
+    setState(old => ({ provider, key, page: old.provider === provider && old.key === key ? old.page : undefined, loading: true, error: false }));
     const timer = setTimeout(() => {
       void provider.facet!({ protocolVersion: 1, datasetId: descriptor.id, selection, fieldId: field.id, filters: otherFilters, search, limit: 100, ...(cursor ? { cursor } : {}) }, controller.signal)
         .then(page => {
@@ -28,12 +29,12 @@ export function useFacetOptions(provider: SandboxDataProvider, descriptor: Datas
           if (controller.signal.aborted || lastIdentity.current !== identity) return;
           for (const item of page.values) known.current.set(JSON.stringify(item.value), item.label);
           while (known.current.size > 2000) known.current.delete(known.current.keys().next().value!);
-          setState(old => ({ key, loading: false, error: false, page: cursor && old.key === key && old.page ? { ...page, values: [...old.page.values, ...page.values].filter((item, i, all) => all.findIndex(other => other.value === item.value) === i).slice(0, 1000) } : page }));
-        }).catch(() => { if (!controller.signal.aborted) setState({ key, loading: false, error: true }); });
+          setState(old => ({ provider, key, loading: false, error: false, page: cursor && old.provider === provider && old.key === key && old.page ? { ...page, values: [...old.page.values, ...page.values].filter((item, i, all) => all.findIndex(other => other.value === item.value) === i).slice(0, 1000) } : page }));
+        }).catch(() => { if (!controller.signal.aborted) setState({ provider, key, loading: false, error: true }); });
     }, search ? 150 : 0);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [provider, descriptor, selection, field, otherFilters, key, cursor, enabled, search]);
-  return { page: state.key === key ? state.page : undefined, loading: state.key === key && state.loading, error: state.key === key && state.error,
+  return { page: state.provider === provider && state.key === key ? state.page : undefined, loading: state.provider === provider && state.key === key && state.loading, error: state.provider === provider && state.key === key && state.error,
     known: known.current, more: () => { if (state.page?.nextCursor) setPagination({ key, cursor: state.page.nextCursor }); } };
 }
 

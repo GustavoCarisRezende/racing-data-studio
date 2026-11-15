@@ -3,8 +3,9 @@ import type { Locale, Translate } from '../../i18n/messages';
 import { sortPositions } from './sort';
 import { formatDate } from './dates';
 import { filterEvents } from './search';
+import { isPendingEvent } from './event-status';
 
-export type Race = { round: string; raceName: string; date: string; Circuit?: { circuitName?: string } };
+export type Race = { round: string; raceName: string; date: string; time?: string | null; sprintDate?: string | null; sprintTime?: string | null; Circuit?: { circuitName?: string } };
 export type ResultRow = { round: string; type: string; result: { Driver?: { givenName?: string; familyName?: string; driverId?: string }; Constructor?: { name?: string }; positionText?: string; points?: string; status?: string } };
 export type Details = { calendar: Race[]; results: ResultRow[] };
 
@@ -52,9 +53,12 @@ export function Explore({ t, locale, year, details, importedAt }: { t: Translate
         <label className="sr-only" htmlFor="f1-event-search">{t('searchEvents')}</label>
         <div className="event-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input id="f1-event-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('searchEvents')} autoComplete="off" /></div>
         <div className="event-grid" role="region" aria-label={t('calendar')} tabIndex={0}>
-          {visibleEvents.length === 0 ? <p className="event-empty" role="status">{t('noMatchingEvents')}</p> : visibleEvents.map((race) => <button type="button" key={race.round} className="event-card" aria-pressed={round === race.round} onClick={(click) => { setRound(race.round); setSession('results'); setFocusedRow(0); if (click.detail > 0 && window.matchMedia('(max-width: 950px)').matches) previewRef.current?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }}>
-            <span className="event-round">R{race.round}</span><span className="event-card-copy"><strong>{race.raceName}</strong><span>{race.Circuit?.circuitName ?? '—'}</span></span><span className="event-date">{formatDate(race.date, locale)}</span>
-          </button>)}
+          {visibleEvents.length === 0 ? <p className="event-empty" role="status">{t('noMatchingEvents')}</p> : visibleEvents.map((race) => {
+            const pending = isPendingEvent(race, details.results, race.round);
+            return <button type="button" key={race.round} className={`event-card${pending ? ' event-card--pending' : ''}`} aria-pressed={round === race.round} onClick={(click) => { setRound(race.round); setSession('results'); setFocusedRow(0); if (click.detail > 0 && window.matchMedia('(max-width: 950px)').matches) previewRef.current?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }}>
+            <span className="event-round">R{race.round}</span><span className="event-card-copy"><strong>{race.raceName}</strong><span>{race.Circuit?.circuitName ?? '—'}</span></span><span className="event-card-meta">{pending && <span className="event-pending-label">{t('pendingResults')}</span>}<span className="event-date">{formatDate(race.date, locale)}</span></span>
+          </button>;
+          })}
         </div>
       </section>
       <section ref={previewRef} className="event-preview" aria-label={t('results')}>

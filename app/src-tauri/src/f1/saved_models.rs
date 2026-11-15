@@ -40,6 +40,7 @@ struct Visualization {
     #[serde(skip_serializing_if = "Option::is_none")] calculation: Option<Calculation>,
     #[serde(skip_serializing_if = "Option::is_none")] pie: Option<Pie>,
     #[serde(skip_serializing_if = "Option::is_none")] unify_events: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")] unify_legends: Option<bool>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,7 +56,7 @@ fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as
 fn parse(raw: Value) -> Result<Model> {
     let serialized = serde_json::to_string(&raw).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 || raw.get("revision").is_none() || raw.pointer("/visualization/series").is_none() || raw.pointer("/visualization/comparison").is_none() { return Err(invalid()); }
-    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation", "pie", "unifyEvents"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
+    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation", "pie", "unifyEvents", "unifyLegends"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
     if raw.pointer("/visualization/pie/otherBelow").map_or(false, Value::is_null) { return Err(invalid()); }
     for key in ["sort", "sorts", "groupBy"] { if raw.pointer(&format!("/visualization/table/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
     let doc: Model = serde_json::from_value(raw).map_err(|_| invalid())?;
@@ -233,6 +234,31 @@ mod table_v2_tests {
         let saved_simple = save(&mut db, simple_unified, None, true).unwrap();
         assert_eq!(saved_simple["visualization"]["unifyEvents"], true);
         assert_eq!(load(&db, "simple-unified", true).unwrap(), saved_simple);
+        for version in [2, 3] {
+            for unify_legends in [true, false] {
+                let mut legends = if version == 2 {
+                    json!({"documentVersion":2,"kind":"model","id":"legend-v2","revision":null,"title":"Legend preference","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"line","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"})
+                } else {
+                    json!({"documentVersion":3,"kind":"model","id":"legend-v3","revision":null,"title":"Legend preference","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"bar","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","extraDimensions":["session"],"calculation":{"version":3,"profileId":"driver-all-sessions-v1"},"runningSum":true},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"})
+                };
+                legends["documentVersion"] = json!(version);
+                legends["id"] = json!(format!("legend-v{version}-{unify_legends}"));
+                legends["visualization"]["unifyLegends"] = json!(unify_legends);
+                let id = legends["id"].as_str().unwrap().to_owned();
+                let saved = save(&mut db, legends, None, true).unwrap();
+                assert_eq!(saved["visualization"]["unifyLegends"], unify_legends);
+                assert_eq!(load(&db, &id, true).unwrap(), saved);
+            }
+        }
+        let mut invalid_legends = json!({"documentVersion":2,"kind":"model","id":"invalid-legends","revision":null,"title":"Invalid","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"line","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false,"unifyLegends":"true"},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        assert!(parse(invalid_legends.clone()).is_err());
+        invalid_legends["visualization"]["unifyLegends"] = Value::Null;
+        assert!(parse(invalid_legends).is_err());
+        let legacy_legends = json!({"documentVersion":2,"kind":"model","id":"legacy-legends","revision":null,"title":"Legacy","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"line","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved_legacy = save(&mut db, legacy_legends, None, true).unwrap();
+        assert!(saved_legacy["visualization"].get("unifyLegends").is_none());
+        assert_eq!(load(&db, "legacy-legends", true).unwrap(), saved_legacy);
+        assert!(saved_old["visualization"].get("unifyEvents").is_none());
         unified["id"] = json!("invalid-unified");
         unified["visualization"]["extraDimensions"] = json!([]);
         assert!(parse(unified).is_err());

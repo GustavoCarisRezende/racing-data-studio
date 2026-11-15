@@ -86,3 +86,54 @@ final no WebView do Tauri.
 Esta revisão passou em 69 testes da biblioteca e 32 do aplicativo, além do build
 web. A prévia Chromium confirmou multiseleção sincronizada, recálculo sem botão,
 checkbox padrão marcada e os grupos condicionais e ordenados.
+
+## Estabilidade da legenda e identificação de eventos pendentes
+
+A legenda reserva espaço fixo para as amostras de cor e usa uma referência de
+séries independente do filtro sincronizado. Selecionar pilotos não remove os
+traços dos demais itens nem muda suas larguras ou ordem. As cores e os padrões
+também são preservados no gráfico e na exportação. Consultas vazias ou com erro
+mantêm a legenda utilizável sem exibir pontos antigos. Uma referência
+indisponível mantém o espaço reservado para séries ainda desconhecidas.
+
+Em **Explorar eventos**, o contorno vermelho e o rótulo **Pendente** identificam
+eventos futuros ou sem qualquer resultado local de corrida/sprint. Quando há
+horário com fuso explícito, a comparação usa o instante completo; sem ele, usa
+a data civil. O marcador não altera nem sincroniza dados.
+
+Validação desta correção: 70 testes da biblioteca, 37 do aplicativo e build web
+aprovados. No Chromium, foram comparados tamanhos, posições e traços da legenda
+após multiseleção e verificado o contorno vermelho dos eventos com dados
+sintéticos. A validação no WebView nativo continua pendente.
+
+## Unificar Legendas
+
+**Unificar Legendas** fica em **Comportamento dos gráficos**. Marcada (padrão),
+agrupa as séries por piloto; a temporada aparece apenas nos swatches/linhas do
+hover. Desmarcada, cada linha/série tem uma entrada própria e o rótulo inclui a
+temporada. Os dois modos ordenam os rótulos alfabeticamente de acordo com o
+locale. `visualization.unifyLegends` é opcional em modelos v2/v3:
+quando ausente, equivale ao padrão marcado; não requer migration nem regravação
+de modelos antigos. A opção altera somente a apresentação da legenda, não os
+dados nem os agrupamentos da consulta. A validação desta opção no WebView nativo
+ainda não foi feita.
+
+Nos dois modos, os cliques continuam filtrando pelo ID do piloto, sem mudar as
+temporadas selecionadas. A prévia Chromium com duas temporadas confirmou os
+nomes sem ano no modo unificado, os títulos de hover individuais por cor e seis
+entradas com ano em ordem alfabética no modo separado (três pilotos).
+A verificação passou em 71 testes da biblioteca, 37 da aplicação e 44 de Rust
+(um teste opcional de rede ignorado), além do build web.
+
+## Tooltip de linhas coincidentes
+
+No gráfico de linhas, o tooltip reúne as séries visíveis que têm o mesmo índice
+de categoria (X) e valor numérico projetado (Y). Linhas com outro Y no mesmo X,
+ou o mesmo Y em outro X, não entram no grupo. Zero é um valor válido; pontos
+nulos não são incluídos. Nomes de pilotos e temporadas continuam identificando
+cada registro. Barras, pizza e dispersão mantêm seus tooltips individuais.
+
+Esta alteração passou em 74 testes da biblioteca e 38 da aplicação, além do
+build web. No Chromium com ECharts SVG real, o ponto compartilhado por duas
+séries mostrou os dois registros; outro ponto com o mesmo Y em outra rodada
+mostrou somente sua própria série.

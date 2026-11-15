@@ -139,8 +139,8 @@ test('model stores round-trip preference flags for v2/v3 and accept legacy docum
     throw new Error(command);
   });
   const common = { kind: 'model', revision: null, title: 'Preference flags', datasetId: 'f1.session_results', datasetSchemaVersion: '1', datasetSemanticVersion: '1', binding: { policy: 'latest', partitionIds: ['2024'] }, filters: [{ fieldId: 'season', op: 'in', values: ['2024'] }], createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
-  const v2 = { ...common, documentVersion: 2, id: 'flags-v2', visualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: null, comparison: 'season', runningSum: false } };
-  const v3 = { ...common, documentVersion: 3, id: 'flags-v3', visualization: { kind: 'bar', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', extraDimensions: ['session'], calculation: { version: 3, profileId: 'driver-all-sessions-v1' }, runningSum: true } };
+  const v2 = { ...common, documentVersion: 2, id: 'flags-v2', visualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: null, comparison: 'season', runningSum: false, unifyLegends: true } };
+  const v3 = { ...common, documentVersion: 3, id: 'flags-v3', visualization: { kind: 'bar', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', extraDimensions: ['session'], calculation: { version: 3, profileId: 'driver-all-sessions-v1' }, runningSum: true, unifyLegends: false } };
 
   const savedV2 = await store.models.save({ ...v2, saveFilters: false, saveDataSelection: true }, null);
   const savedV3 = await store.modelsV3.save({ ...v3, saveFilters: true, saveDataSelection: false }, null);
@@ -150,11 +150,14 @@ test('model stores round-trip preference flags for v2/v3 and accept legacy docum
   const loadedV3 = await store.modelsV3.load(v3.id);
   assert.deepEqual([loadedV2.saveFilters, loadedV2.saveDataSelection], [false, true]);
   assert.deepEqual([loadedV3.saveFilters, loadedV3.saveDataSelection], [true, false]);
+  assert.equal(loadedV2.visualization.unifyLegends, true);
+  assert.equal(loadedV3.visualization.unifyLegends, false);
 
   for (const id of [v2.id, v3.id]) {
     const legacy = persisted.get(id);
     delete legacy.saveFilters;
     delete legacy.saveDataSelection;
+    delete legacy.visualization.unifyLegends;
   }
   const legacyV2 = await store.models.load(v2.id);
   const legacyV3 = await store.modelsV3.load(v3.id);
@@ -162,6 +165,10 @@ test('model stores round-trip preference flags for v2/v3 and accept legacy docum
   assert.equal(Object.hasOwn(legacyV2, 'saveDataSelection'), false);
   assert.equal(Object.hasOwn(legacyV3, 'saveFilters'), false);
   assert.equal(Object.hasOwn(legacyV3, 'saveDataSelection'), false);
+  assert.equal(Object.hasOwn(legacyV2.visualization, 'unifyLegends'), false);
+  assert.equal(Object.hasOwn(legacyV3.visualization, 'unifyLegends'), false);
+  await assert.rejects(store.models.save({ ...v2, visualization: { ...v2.visualization, unifyLegends: 'false' } }, null), error => error.code === 'INVALID_CONTRACT');
+  await assert.rejects(store.modelsV3.save({ ...v3, visualization: { ...v3.visualization, unifyLegends: null } }, null), error => error.code === 'INVALID_CONTRACT');
 });
 
 test('presentation exposes only available views and keeps source names separate from filter IDs', async () => {
@@ -515,4 +522,49 @@ test('unified cumulative result stays unknown for an empty past race but uses sp
   const pastSelection = await past.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
   const pastResult = await past.query({ ...query, selection: pastSelection });
   assert.equal(pastResult.rows.find(row => row.values.round === 2).values.points, null);
+});
+
+test('line-chart provider preserves every driver and season at shared X/Y coordinates', async () => {
+  const namedEntry = (driver, firstName, lastName, points) => {
+    const result = entry('1', 'results', driver, points);
+    result.result.Driver.givenName = firstName;
+    result.result.Driver.familyName = lastName;
+    return result;
+  };
+  const provider = createProvider(async () => [
+    snapshot(2024, 'tooltip-2024', [
+      namedEntry('driver-a', 'Ana', 'Lima', '0'),
+      namedEntry('driver-b', 'Bruno', 'Costa', '5'),
+    ]),
+    snapshot(2025, 'tooltip-2025', [
+      namedEntry('driver-a', 'Ana', 'Lima', '0'),
+      namedEntry('driver-b', 'Bruno', 'Costa', '7'),
+    ]),
+  ]);
+  const descriptor = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
+  const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: descriptor.id, policy: 'latest', partitionIds: [] });
+  const query = {
+    ...base(selection, descriptor),
+    dimensions: ['round', 'driver', 'season'],
+    orderBy: [{ fieldId: 'round', direction: 'asc' }],
+  };
+  const result = await provider.query(query);
+  contracts.assertResult(result, query, descriptor);
+  assert.deepEqual(result.rows.map(row => [
+    row.values.round, row.values.driver, row.values.driver_name, row.values.season, row.values.points,
+  ]), [
+    [1, 'driver-a', 'Ana Lima', '2024', '0'],
+    [1, 'driver-a', 'Ana Lima', '2025', '0'],
+    [1, 'driver-b', 'Bruno Costa', '2024', '5'],
+    [1, 'driver-b', 'Bruno Costa', '2025', '7'],
+  ]);
+
+  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const chart = core.buildChartModel(descriptor, query, result, 'line', 'en-US', 'Shared coordinates');
+  assert.deepEqual(chart.series.map(series => [series.label, series.dimensions, series.values]), [
+    ['Ana Lima · 2024', { driver: 'driver-a', season: '2024' }, [0]],
+    ['Ana Lima · 2025', { driver: 'driver-a', season: '2025' }, [0]],
+    ['Bruno Costa · 2024', { driver: 'driver-b', season: '2024' }, [5]],
+    ['Bruno Costa · 2025', { driver: 'driver-b', season: '2025' }, [7]],
+  ]);
 });

@@ -114,6 +114,10 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .event-grid:focus-visible,.table-wrap:focus-visible { outline:2px solid #ff5470; outline-offset:2px; }
 .event-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; width:100%; text-align:left; font:inherit; color:#f6f7f9; padding:8px; border:1px solid #252e3a; border-radius:7px; background:#111720; cursor:pointer; }
 .event-card:hover { background:#202833; border-color:#657386; }
+.event-card--pending { box-shadow:inset 0 0 0 1px #d7263d; }
+.event-card--pending:hover { box-shadow:inset 0 0 0 1px #d7263d; }
+.event-card-meta { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.event-pending-label { color:#ff9aa8; font-size:10px; line-height:1.1; font-weight:700; }
 .event-card[aria-pressed="true"] { border-color:#ff3152; background:#451824; }
 .event-round { color:#f6f7f9; background:#313a47; border-radius:5px; padding:3px 6px; font-size:12px; font-weight:700; }
 .event-card[aria-pressed="true"] .event-round { background:#a3203c; }

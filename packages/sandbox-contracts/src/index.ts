@@ -223,6 +223,8 @@ export interface VisualizationSpec {
   runningSum: boolean;
   /** Optional persisted preference; inactive when the required event selection is absent. */
   unifyEvents?: boolean;
+  /** Presentation preference; omitted preserves unified legends. */
+  unifyLegends?: boolean;
   /** Scatter's numeric X measure. `metric` is numeric Y; `x` remains observation grain. */
   secondaryMetric?: MetricSelection;
   cumulativeScope?: 'filteredSelection' | 'beforeDisplayFilter';

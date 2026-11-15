@@ -182,7 +182,7 @@ export interface ChartModel {
   xLabel: string;
   yLabel: string;
   categories: { key: string; label: string }[];
-  series: { id: string; label: string; values: (number | null)[]; dimensions?: Record<string, Scalar>; valueLabels?: string[]; points?: { id: string; label: string; value: [number, number] }[] }[];
+  series: { id: string; label: string; values: (number | null)[]; paletteIndex?: number; dimensions?: Record<string, Scalar>; valueLabels?: string[]; points?: { id: string; label: string; value: [number, number] }[] }[];
   slices?: { id: string; label: string; value: number; exactValue?: string }[];
   piePresentation?: { showLegend: boolean; showLabels: boolean };
   omitted?: number;
