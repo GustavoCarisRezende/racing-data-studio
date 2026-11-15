@@ -136,7 +136,7 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .session-toggle { display:flex; gap:8px; margin-bottom:12px; }
 .f1-notice { margin:18px 0; padding:14px; border:1px solid #977e35; border-radius:8px; background:#292517; line-height:1.5; }
 .snapshot-list { list-style:none; padding:0; display:grid; gap:10px; }
-.snapshot-list li { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; padding:12px; border:1px solid #353d4c; border-radius:8px; }
+.snapshot-list li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:16px; padding:12px; border:1px solid #353d4c; border-radius:8px; }
 .snapshot-list button:disabled { opacity:.5; cursor:not-allowed; }
 .snapshot-help { margin:18px 0; border:1px solid #465060; border-radius:10px; background:#151b25; padding:13px 16px; }
 .snapshot-help summary { cursor:pointer; font-weight:650; color:#f6f7f9; }
@@ -146,13 +146,51 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 @media (max-width:950px) { .event-layout { grid-template-columns:1fr; height:auto; } .event-calendar { height:min(45vh, 340px); min-height:230px; } .event-preview { overflow:visible; } .event-preview .table-wrap { flex:none; max-height:min(50vh, 420px); } }
 @media (max-width:430px) { .event-calendar,.event-preview { padding:12px; } .event-card { gap:6px; padding:7px; } .event-date { font-size:11px; } }
 
-/* The data studio needs a wide canvas, without changing the other category screens. */
-.content:has(.f1-sandbox) { width:calc(100% - 64px); max-width:1800px; }
-.content:has(.f1-sandbox) .module-screen { padding-top:16px; }
-.f1-screen:has(.f1-sandbox) { max-width:none; }
-.f1-screen:has(.f1-sandbox)>h1 { margin:0 0 4px; font-size:24px; line-height:1.2; }
-.f1-analysis-description { margin:0 0 8px; font-size:13px; }
-.content:has(.f1-sandbox) .back { margin-bottom:8px; padding:4px 0; font-size:12px; }
-.f1-screen:has(.f1-sandbox) .f1-tab-scroll { margin:10px 0 14px; }
-.f1-screen:has(.f1-sandbox) .f1-nav button { font-size:13px; padding:8px 12px; }
-@media (max-width:760px) { .content:has(.f1-sandbox) { width:calc(100% - 24px); } .f1-screen:has(.f1-sandbox)>h1 { font-size:22px; } }
+/* Use one shared wide canvas for every F1 screen; other category screens keep their own layout. */
+.content:has(.f1-screen) { width:calc(100% - 64px); max-width:1800px; }
+.content:has(.f1-screen) .module-screen { padding-top:16px; }
+.f1-screen { max-width:none; }
+.f1-screen>h1 { margin:0 0 4px; font-size:24px; line-height:1.2; }
+.f1-analysis-description { height:20px; margin:0 0 8px; font-size:13px; line-height:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.content:has(.f1-screen) .back { margin-bottom:8px; padding:4px 0; font-size:12px; }
+.f1-screen .f1-tab-scroll { margin:10px 0 14px; }
+.f1-screen .f1-nav button { font-size:13px; padding:8px 12px; }
+.year-search-label { display:block; margin:14px 0 6px; }
+.year-search { display:block; width:min(300px,100%); margin-bottom:10px; padding:9px 12px; border:1px solid #536071; border-radius:8px; background:#1b1f28; color:#f6f7f9; font:inherit; }
+.sync-year-picker { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:12px 16px; width:100%; }
+.sync-year-selection { display:flex; align-items:center; flex-wrap:wrap; gap:10px; min-width:0; }
+.sync-year-combobox { position:relative; }
+.season-controls .sync-year-trigger { min-width:100px; text-align:left; background:#1b1f28; border-color:#536071; }
+.sync-year-popup { position:absolute; z-index:4; top:calc(100% + 5px); left:0; width:min(320px,calc(100vw - 48px)); padding:8px; border:1px solid #536071; border-radius:8px; background:#151b25; box-shadow:0 8px 24px #0009; }
+.sync-year-popup input { width:100%; padding:8px 10px; border:1px solid #536071; border-radius:6px; background:#111720; color:#f6f7f9; font:inherit; }
+.sync-year-listbox { max-height:220px; overflow:auto; margin-top:5px; }
+.sync-year-option { padding:7px 9px; border-radius:5px; cursor:pointer; }
+.sync-year-option.is-active,.sync-year-option:hover { background:#344154; }
+.sync-year-empty { margin:8px; }
+.sync-only-missing { display:flex; align-items:center; gap:8px; margin:0; }
+.sync-only-missing input { width:17px; height:17px; accent-color:#ff5470; }
+.sync-year-invalid { flex-basis:100%; margin:0; color:#ffd6dd; }
+.sync-info { flex-basis:100%; margin:16px 0; color:#d4dce8; }
+.sync-info summary { width:max-content; cursor:pointer; color:#f6f7f9; }
+.sync-info summary:focus-visible { outline:2px solid #ff5470; outline-offset:4px; }
+.snapshot-list .snapshot-delete-icon { width:32px; height:32px; display:grid; place-items:center; padding:5px; color:#ff9dae; background:transparent; border-color:transparent; }
+.snapshot-list .snapshot-delete-icon:hover:not(:disabled) { background:#3c1b29; border-color:#7d3444; }
+.snapshot-delete-icon svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.snapshot-info { min-width:0; display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
+.snapshot-info strong { overflow-wrap:anywhere; }
+.snapshot-info span { color:#bac4d1; font-size:13px; overflow-wrap:anywhere; }
+.snapshot-actions,.snapshot-actions form { display:flex; align-items:center; gap:8px; }
+.snapshot-actions { justify-content:flex-end; white-space:nowrap; }
+.snapshot-actions form { flex-wrap:wrap; }
+.snapshot-actions input { width:min(180px,22vw); min-width:110px; padding:8px; color:#fff; background:#111720; border:1px solid #536071; border-radius:6px; font:inherit; }
+.confirm-dialog h2 { margin-top:0; }
+.snapshot-inline-error { flex-basis:100%; margin:0; padding:9px 11px; border-left:3px solid #ff5470; border-radius:4px; background:#2b1820; color:#ffd6dd; line-height:1.45; }
+.snapshot-actions input[aria-invalid="true"] { border-color:#ff5470; }
+.confirm-dialog>div { display:flex; justify-content:flex-end; gap:10px; }
+.confirm-dialog .danger { background:#c91e3c; }
+.shell-error { position:fixed; z-index:5; right:16px; bottom:90px; max-width:min(420px,calc(100vw - 32px)); padding:12px; border:1px solid #ff5470; border-radius:8px; background:#2b1820; color:white; }
+@media (max-width:900px) { .snapshot-list li { grid-template-columns:minmax(0,1fr); gap:10px; } .snapshot-actions { justify-content:flex-start; flex-wrap:wrap; } }
+@media (max-width:760px) { .content:has(.f1-screen) { width:calc(100% - 24px); } .f1-screen>h1 { font-size:22px; } }
+@media (max-width:900px) { .sync-year-picker { row-gap:12px; } }
+@media (max-width:760px) { .sync-year-picker { align-items:flex-start; gap:10px 12px; } .sync-year-selection { align-items:flex-start; } .sync-only-missing { max-width:100%; } }
+@media (max-width:560px) { .sync-year-selection { flex-basis:100%; } }

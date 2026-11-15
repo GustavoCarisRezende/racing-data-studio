@@ -260,6 +260,30 @@ pub async fn f1_snapshots(app: tauri::AppHandle, year: u16) -> Result<Vec<Value>
 }
 
 #[tauri::command]
+pub async fn f1_snapshot_rename(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: i32, snapshot_id: i64, name: String) -> Result<(), String> {
+    if !(1950..=2100).contains(&year) || snapshot_id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
+    let dir = app.path().app_data_dir().map_err(|_| "DATABASE_ERROR".to_string())?;
+    let guard = state.inner().begin(year as u16)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|_| "DATABASE_ERROR".to_string())?.rename_snapshot(year, snapshot_id, &name)
+    }).await.map_err(|_| "DATABASE_ERROR".to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_snapshot_delete(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: i32, snapshot_id: i64) -> Result<(), String> {
+    if !(1950..=2100).contains(&year) || snapshot_id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
+    let dir = app.path().app_data_dir().map_err(|_| "DATABASE_ERROR".to_string())?;
+    let guard = state.inner().begin(year as u16)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|_| "DATABASE_ERROR".to_string())?.delete_snapshot(year, snapshot_id)
+    }).await.map_err(|_| "DATABASE_ERROR".to_string())?
+}
+
+#[tauri::command]
 pub async fn f1_restore_snapshot(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: u16, id: i64) -> Result<(), String> {
     if !(1950..=2100).contains(&year) || id <= 0 { return Err("Invalid season or snapshot".into()); }
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

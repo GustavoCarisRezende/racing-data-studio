@@ -2,6 +2,8 @@ import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { categories } from './categories/registry';
 import { messages, type Locale } from './i18n/messages';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isFullscreenShortcut, openProject, GITHUB_URL, runFullscreenToggle } from './desktop-bridge';
 import logo from './assets/rds-logo.svg';
 import background from './assets/header-background.svg';
 import categoryMark from './assets/category-mark.svg';
@@ -11,6 +13,8 @@ function App() {
   const [locale, setLocale] = useState<Locale>(() => navigator.language.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [shellError, setShellError] = useState('');
+  const fullscreenBusy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const t = (key: keyof typeof messages['en-US']) => messages[locale][key];
@@ -20,7 +24,10 @@ function App() {
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && searchRef.current && !dialogRef.current?.open) {
+      if (isFullscreenShortcut(event) && isTauri()) {
+        event.preventDefault();
+        void runFullscreenToggle(fullscreenBusy, () => invoke('toggle_fullscreen'), () => setShellError(t('fullscreenError')));
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && searchRef.current && !dialogRef.current?.open) {
         event.preventDefault();
         searchRef.current.focus();
       } else if (event.key === 'Escape' && document.activeElement === searchRef.current) {
@@ -29,7 +36,7 @@ function App() {
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [locale]);
 
   return <div className="app-shell">
     <header className="masthead">
@@ -71,13 +78,14 @@ function App() {
       </>}</div>
     </main>
     <footer className="footer">
-      <a className="footer-link" href="https://github.com/GustavoCarisRezende/racing-data-studio" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .9a11.1 11.1 0 0 0-3.51 21.64c.55.1.75-.24.75-.53v-1.87c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.61-1.22-1.61-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.56 1.19 3.18.91.1-.71.38-1.19.7-1.47-2.45-.28-5.02-1.23-5.02-5.47 0-1.21.43-2.2 1.13-2.98-.11-.27-.49-1.41.11-2.94 0 0 .93-.3 3.05 1.14A10.6 10.6 0 0 1 12 6.77c.94 0 1.89.13 2.77.37 2.12-1.44 3.04-1.14 3.04-1.14.61 1.53.23 2.67.12 2.94.71.78 1.13 1.77 1.13 2.98 0 4.25-2.58 5.19-5.04 5.46.4.35.75 1.02.75 2.06v2.57c0 .3.2.63.76.53A11.11 11.11 0 0 0 12 .9Z" /></svg>{t('github')}</a>
+      <a className="footer-link" href={GITHUB_URL} onClick={(event) => { event.preventDefault(); void openProject(isTauri(), (command) => invoke(command), (url, target, features) => window.open(url, target, features)).catch(() => setShellError(t('githubError'))); }}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .9a11.1 11.1 0 0 0-3.51 21.64c.55.1.75-.24.75-.53v-1.87c-3.06.66-3.7-1.3-3.7-1.3-.5-1.27-1.22-1.61-1.22-1.61-1-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.56 1.19 3.18.91.1-.71.38-1.19.7-1.47-2.45-.28-5.02-1.23-5.02-5.47 0-1.21.43-2.2 1.13-2.98-.11-.27-.49-1.41.11-2.94 0 0 .93-.3 3.05 1.14A10.6 10.6 0 0 1 12 6.77c.94 0 1.89.13 2.77.37 2.12-1.44 3.04-1.14 3.04-1.14.61 1.53.23 2.67.12 2.94.71.78 1.13 1.77 1.13 2.98 0 4.25-2.58 5.19-5.04 5.46.4.35.75 1.02.75 2.06v2.57c0 .3.2.63.76.53A11.11 11.11 0 0 0 12 .9Z" /></svg>{t('github')}</a>
       <span className="footer-disclaimer">{t('disclaimer')}</span>
       <button className="footer-about" type="button" aria-label={t('about')} onClick={() => dialogRef.current?.showModal()}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10.5v6.2m0-10.3v.5" /></svg><span>{t('about')}</span>
       </button>
     </footer>
-    <dialog ref={dialogRef} aria-labelledby="about-title"><h2 id="about-title">{t('title')}</h2><p>{t('projectInfo')}</p><button type="button" onClick={() => dialogRef.current?.close()}>{t('close')}</button></dialog>
+    {shellError && <p className="shell-error" role="alert">{shellError}</p>}
+    <dialog ref={dialogRef} aria-labelledby="about-title"><h2 id="about-title">{t('title')}</h2><h3>{t('aboutPurpose')}</h3><p>{t('aboutPurposeText')}</p><h3>{t('aboutStart')}</h3><p>{t('aboutStartText')}</p><h3>{t('aboutData')}</h3><p>{t('aboutDataText')}</p><h3>{t('aboutContribute')}</h3><p>{t('aboutContributeText')}</p><h3>{t('aboutLicenses')}</h3><p>{t('aboutLicensesText')}</p><button type="button" onClick={() => dialogRef.current?.close()}>{t('close')}</button></dialog>
   </div>;
 }
 

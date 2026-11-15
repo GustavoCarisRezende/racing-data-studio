@@ -137,6 +137,25 @@ pub fn check_revisions(connection: &Connection, refs: &[Revision]) -> Result<()>
     }
     Ok(())
 }
+
+/// Fail closed if any stored analysis is malformed or does not match its row identity.
+pub fn pinned_snapshot_references(connection: &Connection) -> Result<HashSet<(u16, i64)>> {
+    let mut stmt = connection.prepare("SELECT id, revision, document FROM f1_saved_analyses ORDER BY id LIMIT 1001").map_err(|_| invalid())?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).map_err(|_| invalid())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|_| invalid())?;
+    if rows.len() > 1000 { return Err(invalid()); }
+    let mut refs = HashSet::new();
+    for (id, revision, raw) in rows {
+        let value: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+        let doc = parse(value)?;
+        if doc.id != id || doc.revision.as_deref() != Some(&revision) { return Err(invalid()); }
+        for r in doc.selection.revisions {
+            let year = r.partition_id.parse::<u16>().map_err(|_| invalid())?;
+            let snapshot_id = r.revision_id.parse::<i64>().map_err(|_| invalid())?;
+            refs.insert((year, snapshot_id));
+        }
+    }
+    Ok(refs)
+}
 fn parse(value: Value) -> Result<Document> {
     let serialized = serde_json::to_string(&value).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 { return Err(invalid()); }

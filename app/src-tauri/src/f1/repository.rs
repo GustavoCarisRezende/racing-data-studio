@@ -4,7 +4,7 @@ use std::{error::Error, fs, path::Path};
 use std::collections::BTreeMap;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 pub struct F1Repository {
     // Future F1 queries and transactional writes belong here, never in the shell.
@@ -148,9 +148,58 @@ impl F1Repository {
     pub fn saved_save(&mut self, document: serde_json::Value, expected: Option<String>) -> std::result::Result<serde_json::Value, String> { super::saved_analysis::save(&mut self.connection, document, expected) }
 
     pub fn snapshots(&self, year: u16) -> Result<Vec<serde_json::Value>> {
-        let mut stmt = self.connection.prepare("SELECT id, imported_at, COALESCE(source_imported_at, imported_at) FROM f1_imports WHERE season_year = ?1 ORDER BY id DESC")?;
-        let rows = stmt.query_map([year], |r| Ok(serde_json::json!({"id":r.get::<_, i64>(0)?, "importedAt":r.get::<_, String>(1)?, "dataAt":r.get::<_, String>(2)?})))?.collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
+        let tx = self.connection.unchecked_transaction()?;
+        let pinned = super::saved_analysis::pinned_snapshot_references(&tx).ok();
+        let mut stmt = tx.prepare("SELECT i.id, i.imported_at, COALESCE(i.source_imported_at, i.imported_at), m.name, i.id = (SELECT MAX(id) FROM f1_imports WHERE season_year = i.season_year) FROM f1_imports i LEFT JOIN f1_snapshot_metadata m ON m.snapshot_id = i.id WHERE i.season_year = ?1 ORDER BY i.id DESC")?;
+        let rows = stmt.query_map([year], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, bool>(4)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut snapshots = Vec::new();
+        for (id, imported_at, data_at, name, active) in rows {
+            let (can_delete, delete_reason) = if active { (false, Some("ACTIVE_SNAPSHOT")) } else {
+                match pinned.as_ref() {
+                    Some(refs) if refs.contains(&(year, id)) => (false, Some("PINNED_BY_ANALYSIS")),
+                    Some(_) => (true, None),
+                    None => (false, Some("REFERENCE_CHECK_FAILED")),
+                }
+            };
+            let display_name = name.clone().unwrap_or_else(|| format!("Snapshot #{id}"));
+            snapshots.push(serde_json::json!({"id":id,"importedAt":imported_at,"dataAt":data_at,"name":name,"displayName":display_name,"canDelete":can_delete,"deleteReason":delete_reason}));
+        }
+        drop(stmt);
+        tx.commit()?;
+        Ok(snapshots)
+    }
+
+    pub fn rename_snapshot(&mut self, year: i32, id: i64, name: &str) -> std::result::Result<(), String> {
+        if !(1950..=2100).contains(&year) || id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
+        let (name, normalized) = normalize_snapshot_name(name)?;
+        let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| "DATABASE_ERROR".to_string())?;
+        let current_name: Option<Option<String>> = tx.query_row("SELECT m.name FROM f1_imports i LEFT JOIN f1_snapshot_metadata m ON m.snapshot_id=i.id WHERE i.id=?1 AND i.season_year=?2", rusqlite::params![id, year], |r| r.get(0)).optional().map_err(|_| "DATABASE_ERROR".to_string())?;
+        let current_name = current_name.ok_or("SNAPSHOT_NOT_FOUND")?;
+        if current_name.is_none() && name == format!("Snapshot #{id}") { return Ok(()); }
+        let mut ids = tx.prepare("SELECT id FROM f1_imports WHERE season_year=?1").map_err(|_| "DATABASE_ERROR".to_string())?;
+        let mut rows = ids.query([year]).map_err(|_| "DATABASE_ERROR".to_string())?;
+        while let Some(row) = rows.next().map_err(|_| "DATABASE_ERROR".to_string())? {
+            let fallback = format!("Snapshot #{}", row.get::<_, i64>(0).map_err(|_| "DATABASE_ERROR".to_string())?);
+            if casefold(&fallback) == normalized { return Err("NAME_CONFLICT".into()); }
+        }
+        drop(rows);
+        drop(ids);
+        tx.execute("INSERT INTO f1_snapshot_metadata(snapshot_id,season_year,name,normalized_name) VALUES(?1,?2,?3,?4) ON CONFLICT(snapshot_id) DO UPDATE SET name=excluded.name, normalized_name=excluded.normalized_name", rusqlite::params![id,year,name,normalized]).map_err(|e| if is_unique_violation(&e) { "NAME_CONFLICT".to_string() } else { "DATABASE_ERROR".to_string() })?;
+        tx.commit().map_err(|_| "DATABASE_ERROR".to_string())
+    }
+
+    pub fn delete_snapshot(&mut self, year: i32, id: i64) -> std::result::Result<(), String> {
+        if !(1950..=2100).contains(&year) || id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
+        let tx = self.connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| "DATABASE_ERROR".to_string())?;
+        let actual_year: Option<i32> = tx.query_row("SELECT season_year FROM f1_imports WHERE id=?1", [id], |r| r.get(0)).optional().map_err(|_| "DATABASE_ERROR".to_string())?;
+        if actual_year != Some(year) { return Err("SNAPSHOT_NOT_FOUND".into()); }
+        let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM f1_imports WHERE season_year=?1 AND id=(SELECT MAX(id) FROM f1_imports WHERE season_year=?1) AND id=?2)", rusqlite::params![year,id], |r| r.get(0)).map_err(|_| "DATABASE_ERROR".to_string())?;
+        if active { return Err("ACTIVE_SNAPSHOT".into()); }
+        let pinned = super::saved_analysis::pinned_snapshot_references(&tx).map_err(|_| "REFERENCE_CHECK_FAILED".to_string())?;
+        if pinned.contains(&(year as u16, id)) { return Err("PINNED_BY_ANALYSIS".into()); }
+        tx.execute("DELETE FROM f1_import_pages WHERE import_id=?1", [id]).map_err(|_| "DATABASE_ERROR".to_string())?;
+        if tx.execute("DELETE FROM f1_imports WHERE id=?1 AND season_year=?2", rusqlite::params![id,year]).map_err(|_| "DATABASE_ERROR".to_string())? != 1 { return Err("SNAPSHOT_NOT_FOUND".into()); }
+        tx.commit().map_err(|_| "DATABASE_ERROR".to_string())
     }
 
     /// Build per-event projections from one consistent SQLite read transaction.
@@ -289,13 +338,177 @@ fn migrate(connection: &mut Connection) -> Result<()> {
         tx.execute_batch(include_str!("migrations/008_grouped_calculation.sql"))?;
         tx.pragma_update(None, "user_version", 8)?;
     }
+    if version < 9 {
+        tx.execute_batch(include_str!("migrations/009_snapshot_metadata.sql"))?;
+        tx.pragma_update(None, "user_version", 9)?;
+    }
     tx.commit()?;
     Ok(())
+}
+
+fn normalize_snapshot_name(value: &str) -> std::result::Result<(String, String), String> {
+    let name = value.trim();
+    if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+        return Err("INVALID_NAME".into());
+    }
+    Ok((name.to_owned(), casefold(name)))
+}
+fn casefold(value: &str) -> String {
+    // Stable, dependency-free folding: Unicode lowercase plus the explicit
+    // multi-character/special folds below. No canonical normalization is applied.
+    let mut folded = String::new();
+    for ch in value.chars() {
+        match ch {
+            'ß' | 'ẞ' => folded.push_str("ss"),
+            'ς' | 'Σ' => folded.push('σ'),
+            'ſ' => folded.push('s'),
+            'K' => folded.push('k'),
+            'ﬀ' => folded.push_str("ff"),
+            'ﬁ' => folded.push_str("fi"),
+            'ﬂ' => folded.push_str("fl"),
+            'ﬃ' => folded.push_str("ffi"),
+            'ﬄ' => folded.push_str("ffl"),
+            _ => folded.extend(ch.to_lowercase()),
+        }
+    }
+    folded
+}
+fn is_unique_violation(error: &rusqlite::Error) -> bool {
+    matches!(error, rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ffi::ErrorCode::ConstraintViolation)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snapshot_repo() -> F1Repository {
+        let mut db = Connection::open_in_memory().unwrap();
+        migrate(&mut db).unwrap();
+        db.execute("INSERT INTO seasons(year) VALUES (2024),(2025)", []).unwrap();
+        for (year, count) in [(2024, 2), (2025, 1)] {
+            for _ in 0..count {
+                db.execute("INSERT INTO f1_imports(season_year) VALUES (?1)", [year]).unwrap();
+                let id = db.last_insert_rowid();
+                db.execute("INSERT INTO f1_import_pages(import_id,endpoint,page_offset,payload) VALUES (?1,'races',0,'immutable')", [id]).unwrap();
+            }
+        }
+        F1Repository { connection: db }
+    }
+
+    fn valid_analysis(id: &str, year: &str, snapshot: &str) -> String {
+        serde_json::json!({"documentVersion":1,"id":id,"revision":"0123456789abcdef0123456789abcdef","title":"Pinned","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","selection":{"protocolVersion":1,"datasetId":"f1.session_results","token":"token","transformationVersion":"f1-results-1","revisions":[{"partitionId":year,"revisionId":snapshot,"sourceDataAt":"2024-01-01T00:00:00Z","storedAt":"2024-01-01T00:00:00Z"}]},"visualization":{"kind":"table","x":"season","metric":{"metricId":"points","aggregation":"sum"},"series":null,"comparison":null,"runningSum":false},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}).to_string()
+    }
+
+    #[test]
+    fn snapshot_names_trim_casefold_unique_and_bounded() {
+        let mut repo = snapshot_repo();
+        let ids = repo.snapshots(2024).unwrap();
+        let old = ids[1]["id"].as_i64().unwrap();
+        repo.rename_snapshot(2024, old, &format!("Snapshot #{old}")).unwrap();
+        assert_eq!(repo.snapshots(2024).unwrap()[1]["name"], serde_json::Value::Null);
+        repo.rename_snapshot(2024, old, "  Weekend One  ").unwrap();
+        assert_eq!(repo.snapshots(2024).unwrap()[1]["name"], "Weekend One");
+        assert_eq!(repo.rename_snapshot(2024, ids[0]["id"].as_i64().unwrap(), " weekend one "), Err("NAME_CONFLICT".into()));
+        assert_eq!(repo.rename_snapshot(2024, old, "   "), Err("INVALID_NAME".into()));
+        assert_eq!(repo.rename_snapshot(2024, old, &"x".repeat(81)), Err("INVALID_NAME".into()));
+        assert_eq!(repo.rename_snapshot(2024, old, &format!("Snapshot #{}", ids[0]["id"].as_i64().unwrap())), Err("NAME_CONFLICT".into()));
+        assert_eq!(repo.rename_snapshot(2023, old, "Unused"), Err("SNAPSHOT_NOT_FOUND".into()));
+        assert_eq!(repo.rename_snapshot(2024, 0, "Unused"), Err("INVALID_SNAPSHOT".into()));
+        repo.rename_snapshot(2024, old, "Straße").unwrap();
+        assert_eq!(repo.rename_snapshot(2024, ids[0]["id"].as_i64().unwrap(), "STRASSE"), Err("NAME_CONFLICT".into()));
+        let other = repo.snapshots(2025).unwrap()[0]["id"].as_i64().unwrap();
+        repo.rename_snapshot(2025, other, "weekend one").unwrap();
+    }
+
+    #[test]
+    fn delete_checks_active_and_pinned_refs_atomically_and_deletes_pages() {
+        let mut repo = snapshot_repo();
+        let ids = repo.snapshots(2024).unwrap();
+        let active = ids[0]["id"].as_i64().unwrap();
+        let old = ids[1]["id"].as_i64().unwrap();
+        assert_eq!(repo.delete_snapshot(2024, active), Err("ACTIVE_SNAPSHOT".into()));
+        repo.connection.execute("INSERT INTO f1_saved_models(id,revision,document) VALUES('unrelated-model','rev','unknown document')", []).unwrap();
+        // Model selections are not pinned saved analyses.
+        repo.delete_snapshot(2024, old).unwrap();
+        repo.connection.execute("INSERT INTO f1_imports(season_year) VALUES(2024)", []).unwrap();
+        let newer = repo.connection.last_insert_rowid();
+        repo.connection.execute("INSERT INTO f1_import_pages(import_id,endpoint,page_offset,payload) VALUES (?1,'races',0,'immutable')", [newer]).unwrap();
+        let pinned = active;
+        let rev = "0123456789abcdef0123456789abcdef";
+        repo.connection.execute("INSERT INTO f1_saved_analyses(id,revision,document) VALUES('pinned',?1,?2)", rusqlite::params![rev, valid_analysis("pinned", "2024", &pinned.to_string())]).unwrap();
+        assert_eq!(repo.delete_snapshot(2024, pinned), Err("PINNED_BY_ANALYSIS".into()));
+        repo.connection.execute("DELETE FROM f1_saved_analyses", []).unwrap();
+        repo.delete_snapshot(2024, pinned).unwrap();
+        assert_eq!(repo.connection.query_row("SELECT count(*) FROM f1_import_pages WHERE import_id=?1", [pinned], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(repo.snapshots(2024).unwrap().len(), 1);
+        assert_eq!(repo.snapshots(2025).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deleted_snapshot_stays_deleted_after_reopen() {
+        let dir = std::env::temp_dir().join(format!("rds-delete-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        let old;
+        {
+            let mut repo = F1Repository::open(&dir).unwrap();
+            repo.connection.execute("INSERT INTO seasons(year) VALUES(2024)", []).unwrap();
+            repo.connection.execute("INSERT INTO f1_imports(season_year) VALUES(2024)", []).unwrap();
+            old = repo.connection.last_insert_rowid();
+            repo.connection.execute("INSERT INTO f1_imports(season_year) VALUES(2024)", []).unwrap();
+            repo.delete_snapshot(2024, old).unwrap();
+        }
+        {
+            let repo = F1Repository::open(&dir).unwrap();
+            assert!(!repo.snapshots(2024).unwrap().iter().any(|snapshot| snapshot["id"] == old));
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn corrupt_saved_analysis_fails_closed_without_partial_delete() {
+        let mut repo = snapshot_repo();
+        let old = repo.snapshots(2024).unwrap()[1]["id"].as_i64().unwrap();
+        repo.connection.execute("INSERT INTO f1_saved_analyses(id,revision,document) VALUES('bad','rev','not-json')", []).unwrap();
+        assert_eq!(repo.delete_snapshot(2024, old), Err("REFERENCE_CHECK_FAILED".into()));
+        assert_eq!(repo.connection.query_row("SELECT count(*) FROM f1_imports WHERE id=?1", [old], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(repo.snapshots(2024).unwrap()[1]["canDelete"], false);
+    }
+
+    #[test]
+    fn failed_parent_delete_rolls_back_prior_page_deletion() {
+        let mut repo = snapshot_repo();
+        let old = repo.snapshots(2024).unwrap()[1]["id"].as_i64().unwrap();
+        repo.connection.execute_batch("CREATE TRIGGER reject_import_delete BEFORE DELETE ON f1_imports BEGIN SELECT RAISE(ABORT, 'injected failure'); END;").unwrap();
+        assert_eq!(repo.delete_snapshot(2024, old), Err("DATABASE_ERROR".into()));
+        assert_eq!(repo.connection.query_row("SELECT count(*) FROM f1_imports WHERE id=?1", [old], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(repo.connection.query_row("SELECT payload FROM f1_import_pages WHERE import_id=?1", [old], |r| r.get::<_, String>(0)).unwrap(), "immutable");
+    }
+
+    #[test]
+    fn migration_nine_preserves_page_analysis_and_model_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        for sql in [
+            include_str!("migrations/001_initial.sql"), include_str!("migrations/002_snapshots.sql"),
+            include_str!("migrations/003_restore_provenance.sql"), include_str!("migrations/004_saved_analyses.sql"),
+            include_str!("migrations/005_saved_models.sql"), include_str!("migrations/006_model_v3.sql"),
+            include_str!("migrations/007_default_models.sql"), include_str!("migrations/008_grouped_calculation.sql"),
+        ] { db.execute_batch(sql).unwrap(); }
+        db.execute("INSERT INTO seasons(year) VALUES(2024)", []).unwrap();
+        db.execute("INSERT INTO f1_imports(id,season_year,imported_at) VALUES(11,2024,'stored bytes')", []).unwrap();
+        let payload = "{\"opaque\":\"page bytes \\u2603\"}";
+        let analysis = "{\"opaque\":\"analysis bytes\"}";
+        let model = "{\"opaque\":\"model bytes\"}";
+        db.execute("INSERT INTO f1_import_pages VALUES(11,'races',0,?1)", [payload]).unwrap();
+        db.execute("INSERT INTO f1_saved_analyses VALUES('analysis','rev',?1)", [analysis]).unwrap();
+        db.execute("INSERT INTO f1_saved_models VALUES('model','rev',?1)", [model]).unwrap();
+        db.pragma_update(None, "user_version", 8).unwrap();
+        migrate(&mut db).unwrap();
+        assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=11", [], |r| r.get::<_, String>(0)).unwrap(), payload);
+        assert_eq!(db.query_row("SELECT document FROM f1_saved_analyses WHERE id='analysis'", [], |r| r.get::<_, String>(0)).unwrap(), analysis);
+        assert_eq!(db.query_row("SELECT document FROM f1_saved_models WHERE id='model'", [], |r| r.get::<_, String>(0)).unwrap(), model);
+        let foreign_key: String = db.query_row("SELECT on_delete FROM pragma_foreign_key_list('f1_import_pages') LIMIT 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(foreign_key.to_ascii_uppercase(), "NO ACTION");
+    }
 
     #[test]
     fn migration_is_idempotent_and_preserves_data() {
@@ -306,7 +519,7 @@ mod tests {
         migrate(&mut db).unwrap();
         migrate(&mut db).unwrap();
         assert_eq!(db.query_row("SELECT year FROM seasons", [], |r| r.get::<_, i64>(0)).unwrap(), 2024);
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 8);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 9);
     }
 
     #[test]
@@ -343,7 +556,7 @@ mod tests {
         db.execute("INSERT INTO f1_imports(id, season_year, imported_at) VALUES (7, 2024, '2024-01-01T00:00:00Z')", []).unwrap();
         db.execute("INSERT INTO f1_import_pages VALUES (7, 'races', 0, 'original')", []).unwrap();
         migrate(&mut db).unwrap(); migrate(&mut db).unwrap();
-        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 8);
+        assert_eq!(db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 9);
         assert_eq!(db.query_row("SELECT payload FROM f1_import_pages WHERE import_id=7", [], |r| r.get::<_, String>(0)).unwrap(), "original");
         assert_eq!(db.query_row("SELECT count(*) FROM f1_saved_analyses", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }

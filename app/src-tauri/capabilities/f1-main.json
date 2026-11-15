@@ -26,6 +26,10 @@
     "allow-f1-remote-seasons",
     "allow-f1-snapshots",
     "allow-f1-restore-snapshot",
-    "allow-f1-copy-snapshot-events"
+    "allow-f1-copy-snapshot-events",
+    "allow-f1-snapshot-rename",
+    "allow-f1-snapshot-delete",
+    "allow-open-github",
+    "allow-toggle-fullscreen"
   ]
 }
