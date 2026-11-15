@@ -46,6 +46,7 @@
 .rds-sb-advanced { margin-top:13px; color:var(--sb-muted); font-size:11px; }
 .rds-sb-advanced>summary { padding:5px 0; }
 .rds-sb-advanced h3 { font-size:13px; margin:10px 0; }
+.rds-sb-filters > button + details { margin-top:16px; }
 .rds-sb-filter-list { list-style:none; padding:0; }
 .rds-sb-filter-list li { display:flex; align-items:center; justify-content:space-between; gap:5px; overflow-wrap:anywhere; margin-bottom:6px; }
 .rds-sb-filter-list button { flex:none; }
