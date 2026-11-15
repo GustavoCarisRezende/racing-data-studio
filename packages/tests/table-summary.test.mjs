@@ -14,20 +14,17 @@ const snapshots = [snapshot(2024, [result(1, 'a', '1.1'), result(2, 'a', '2.2'),
 const baseline = { kind: 'table', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', runningSum: false };
 const filters = [{ fieldId: 'season', op: 'in', values: ['2024', '2025'] }];
 
-test('recalculation converts a cumulative profile to source-grain query, preserving filters', async () => {
+test('recalculation refuses incompatible cumulative profiles and preserves compatible calculation settings', async () => {
   const provider = syntheticF1From(snapshots);
   const d = await provider.describeDataset({ datasetId: 'f1.session_results', locale: 'en-US' });
   const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: d.id, policy: 'latest', partitionIds: [] });
   const cumulative = withCalculationProfile(d, baseline, 'driver-all-sessions-v1');
-  const next = summarizeTableBy(d, cumulative, 'driver');
-  assert.ok(next);
-  assert.equal(next.runningSum, false);
-  assert.equal(next.calculation, undefined);
-  assert.equal(next.extraDimensions, undefined);
+  assert.equal(summarizeTableBy(d, cumulative, 'driver'), null);
   const cropped = [...filters, { fieldId: 'round', op: 'in', values: [2] }];
   const before = buildQuery(d, selection, cumulative, cropped, 'cumulative-before');
   assert.deepEqual(before.displayFilters, [cropped[1]]);
   assert.ok(before.window);
+  const next = summarizeTableBy(d, baseline, 'driver');
   const q = buildQuery(d, selection, next, cropped, 'summary');
   assert.deepEqual(q.dimensions, ['driver', 'season']);
   assert.equal(q.window, undefined);
@@ -44,6 +41,13 @@ test('recalculation converts a cumulative profile to source-grain query, preserv
   assert.equal(v2Loaded.visualization.x, 'driver');
   assert.deepEqual(v2Loaded.filters, cropped);
   assert.equal(summarizeTableBy(d, cumulative, 'points_raw'), null);
+  const running = { ...baseline, runningSum: true, cumulativeScope: 'filteredSelection' };
+  const compatible = summarizeTableBy(d, running, 'round');
+  assert.ok(compatible);
+  assert.equal(compatible.runningSum, true);
+  assert.equal(compatible.cumulativeScope, 'filteredSelection');
+  assert.deepEqual(compatible.metric, running.metric);
+  assert.equal(summarizeTableBy(d, running, 'driver'), null);
 });
 
 test('table UI recalculates driver/season totals, persists model v3 and reopens without migration', async () => {
@@ -57,33 +61,48 @@ test('table UI recalculates driver/season totals, persists model v3 and reopens 
   const store = { ...createMemoryStore(d), modelsV3: createMemoryModelStore(d, 3) };
   const original = await store.modelsV3.save(makeModelV3(d, [], baseline, filters, 'Synthetic'), null);
   const queries = [];
+  let exported;
   const query = provider.query;
   provider.query = async (...args) => { const response = await query(...args); queries.push({ q: args[0], response }); return response; };
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(140); }); };
   const click = async text => { const b = [...document.querySelectorAll('button')].find(node => node.textContent === text); assert.ok(b, text); await act(async () => b.click()); await settle(); };
   try {
-    await act(async () => root.render(createElement(Sandbox, { provider, store }))); await settle();
+    await act(async () => root.render(createElement(Sandbox, { provider, store, host: { exportFiles: async files => { exported = files; } } }))); await settle();
+    await click('Saved models');
     await act(async () => document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]').click()); await settle();
     assert.deepEqual((await store.modelsV3.load(original.id)), original, 'opening does not migrate or rewrite');
+    assert.ok(![...document.querySelectorAll('label')].some(l => l.firstChild?.textContent === 'Additional row dimension'));
     const select = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === 'Recalculate by').querySelector('select');
     await act(async () => { select.value = 'driver'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
-    assert.ok(document.body.textContent.includes('Result grouping: Driver · Season'));
-    await click('Apply and recalculate');
+    assert.ok(document.body.textContent.includes('Current query grouping: Driver · Season'));
+    assert.ok(![...document.querySelectorAll('button')].some(button => button.textContent === 'Apply and recalculate'));
     const last = queries.at(-1);
     assert.deepEqual(last.q.dimensions, ['driver', 'season']);
     assert.equal(last.q.window, undefined);
     assert.deepEqual(last.q.filters, filters);
     assert.deepEqual(last.response.rows.map(r => [r.values.driver, r.values.season, r.values.points]).sort(), [['a', '2024', '3.3'], ['a', '2025', '15'], ['b', '2024', '4']]);
-    await click('Save model');
+    await click('Export');
+    assert.match(exported[0].text, /"3\.3"/);
+    assert.match(exported[0].text, /"15"/);
+    await click('Save model'); await click('Confirm');
     const saved = await store.modelsV3.load(original.id);
     assert.equal(saved.documentVersion, 3);
     assert.equal(saved.visualization.x, 'driver');
     assert.equal(saved.visualization.comparison, 'season');
     assert.equal(saved.visualization.calculation, undefined);
     assert.deepEqual(saved.filters, filters);
+    await click('Saved models');
     await act(async () => document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]').click()); await settle();
     assert.deepEqual(queries.at(-1).q.dimensions, ['driver', 'season']);
     assert.ok(document.body.textContent.includes('Current query grouping: Driver · Season'));
+    const metric = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === 'Metric').querySelector('select');
+    await act(async () => { metric.value = '@calc:driver-all-sessions-v1'; metric.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
+    const recalculate = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === 'Recalculate by').querySelector('select');
+    assert.equal(recalculate.disabled, true);
+    assert.ok(document.body.textContent.includes('No compatible grouping is available for this calculation'));
+    const profileGrouping = [...document.querySelectorAll('label')].filter(l => l.firstChild?.textContent === 'Additional row dimension');
+    assert.equal(profileGrouping.length, 1);
+    assert.equal(profileGrouping[0].querySelector('select').disabled, false);
   } finally {
     await act(async () => root.unmount()); dom.window.close();
     for (const [key, value] of old) { if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key]; }

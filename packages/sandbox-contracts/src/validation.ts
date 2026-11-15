@@ -142,6 +142,11 @@ export function assertDataset(value: unknown): asserts value is DatasetDescripto
     const m = object(c.multiSelection); id(m.fieldId); integer(m.maxValues, 2, 200);
     check(descriptor.fields.some(f => f.id === m.fieldId && f.role === 'dimension' && f.filters.includes('in') && f.availability !== 'unavailable'), 'Invalid multiselection field');
   }
+  if (c.eventUnification !== undefined) {
+    const u = object(c.eventUnification); id(u.fieldId); array(u.requiredValues, 20);
+    const field = descriptor.fields.find(f => f.id === u.fieldId && f.role === 'dimension' && f.filters.includes('in') && f.availability !== 'unavailable');
+    check(field && u.requiredValues.length >= 2 && u.requiredValues.every(v => v !== null && isScalarOfType(v as Scalar, field.type)) && new Set(u.requiredValues).size === u.requiredValues.length, 'Invalid event unification capability');
+  }
   if (c.runningSumProfiles !== undefined) {
     array(c.runningSumProfiles, 30); const seen = new Set();
     for (const raw of c.runningSumProfiles) {
@@ -273,6 +278,7 @@ export function assertQuery(value: unknown, d: DatasetDescriptor): asserts value
     check((metric.requiredDimensions ?? []).every(key => dimensions.includes(key)), 'Required grouping dimension missing');
   }
   assertFilters(q.filters, d); array(q.orderBy, 10);
+  if (q.unifyEvents !== undefined) { bool(q.unifyEvents); check(!q.unifyEvents || !!d.capabilities.eventUnification, 'Unsupported event unification'); }
   if (q.displayFilters !== undefined) {
     check(q.protocolVersion === 2 || q.protocolVersion === 3, 'Display filters require query v2/v3'); assertFilters(q.displayFilters, d);
     check(q.displayFilters.every(f => dimensions.includes(f.fieldId)), 'Display filters must reference grouped dimensions');
@@ -321,6 +327,7 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
   check(d.fields.some(f => f.id === v.x && f.role === 'dimension' && f.availability !== 'unavailable'), 'Invalid X field');
   if (v.kind === 'line') check(d.fields.some(f => f.id === v.x && f.ordered), 'Line requires ordered axis');
   const metric = object(v.metric); id(metric.metricId); oneOf(metric.aggregation, aggregations); bool(v.runningSum);
+  if (v.unifyEvents !== undefined) { bool(v.unifyEvents); check(!v.unifyEvents || !!d.capabilities.eventUnification, 'Unsupported event unification'); }
   for (const key of ['series', 'comparison']) if (v[key] !== null) {
     id(v[key]); check(v[key] !== v.x && d.fields.some(f => f.id === v[key] && f.role === 'dimension' && f.availability !== 'unavailable'), 'Invalid grouping');
   }
@@ -377,6 +384,7 @@ export function assertVisualization(value: unknown, d: DatasetDescriptor): asser
 
 function projectVisualization(v: VisualizationSpec): VisualizationSpec {
   return { kind: v.kind, x: v.x, metric: { metricId: v.metric.metricId, aggregation: v.metric.aggregation }, series: v.series, comparison: v.comparison, runningSum: v.runningSum,
+    ...(v.unifyEvents !== undefined ? { unifyEvents: v.unifyEvents } : {}),
     ...(v.secondaryMetric ? { secondaryMetric: { metricId: v.secondaryMetric.metricId, aggregation: v.secondaryMetric.aggregation } } : {}),
     ...(v.cumulativeScope ? { cumulativeScope: v.cumulativeScope } : {}),
     ...(v.extraDimensions ? { extraDimensions: [...v.extraDimensions] } : {}),
@@ -387,6 +395,12 @@ function projectVisualization(v: VisualizationSpec): VisualizationSpec {
 export function visualizationDimensions(v: VisualizationSpec): string[] {
   return [v.x, v.series, v.comparison, ...(v.extraDimensions ?? [])].filter((key): key is string => typeof key === 'string');
 }
+export function eventUnificationAvailable(d: DatasetDescriptor, filters: Filter[]): boolean {
+  const capability = d.capabilities.eventUnification;
+  if (!capability) return false;
+  const relevant = filters.filter(f => f.fieldId === capability.fieldId);
+  return relevant.length > 0 && relevant.every(f => f.op === 'in' && capability.requiredValues.every(value => f.values.includes(value)));
+}
 /** Shared wire projection: persistence validation and core must route filters identically. */
 export function configurationQuery(d: DatasetDescriptor, selection: ResolvedSelection, v: VisualizationSpec, filters: Filter[], requestId: string): QueryRequest {
   assertVisualization(v, d);
@@ -396,6 +410,7 @@ export function configurationQuery(d: DatasetDescriptor, selection: ResolvedSele
   if (v.calculation && !profile) fail('Unavailable calculation profile');
   const displayFields = profile?.displayFilterFields ?? (post ? [v.x] : []);
   return { protocolVersion: profile || v.extraDimensions !== undefined ? 3 : post ? 2 : (d.capabilities.queryVersions ?? [1]).includes(1) ? 1 : 2, requestId, datasetId: d.id, schemaVersion: d.schemaVersion, semanticVersion: d.semanticVersion, selection,
+    ...(v.unifyEvents && eventUnificationAvailable(d, filters) ? { unifyEvents: true } : {}),
     dimensions, metrics: [v.metric, ...(v.kind === 'scatter' && v.secondaryMetric ? [v.secondaryMetric] : [])], filters: filters.filter(f => !displayFields.includes(f.fieldId)),
     ...(post || profile ? { displayFilters: filters.filter(f => displayFields.includes(f.fieldId)) } : {}), orderBy: [{ fieldId: v.x, direction: 'asc' }, ...dimensions.filter(key => key !== v.x).map(fieldId => ({ fieldId, direction: 'asc' as const }))],
     ...(v.runningSum ? { window: { kind: 'runningSum', metricId: v.metric.metricId, orderBy: v.x, partitionBy: profile?.partitionBy ?? dimensions.filter(x => x !== v.x), scope: profile ? 'profile' : post ? 'beforeDisplayFilter' : 'filteredSelection', ...(profile ? { profileId: profile.id } : {}) } } : {}), limit: d.capabilities.maxRows };
@@ -445,6 +460,7 @@ function parseModel(input: unknown, d: DatasetDescriptor, version: 2 | 3): Model
   text(m.title, 200); check(m.title.trim().length > 0, 'Missing model title'); instant(m.createdAt); instant(m.updatedAt);
   check(m.datasetId === d.id && m.datasetSchemaVersion === d.schemaVersion && m.datasetSemanticVersion === d.semanticVersion, 'Model dataset version mismatch');
   const binding = object(m.binding); check(binding.policy === 'latest' && binding.revisions === undefined && binding.token === undefined, 'Only latest binding is allowed'); ids(binding.partitionIds, 2000);
+  check((m.saveFilters === undefined || typeof m.saveFilters === 'boolean') && (m.saveDataSelection === undefined || typeof m.saveDataSelection === 'boolean'), 'Invalid model restore preferences');
   assertVisualization(m.visualization, d); assertFilters(m.filters, d);
   check(version === 3 || (m.visualization.extraDimensions === undefined && m.visualization.calculation === undefined), 'New calculation/grain requires model v3');
   if (d.capabilities.multiSelection) {
@@ -457,7 +473,7 @@ function parseModel(input: unknown, d: DatasetDescriptor, version: 2 | 3): Model
   const v = projectVisualization(m.visualization);
   const filters = m.filters.map(f => f.op === 'in' ? { fieldId: f.fieldId, op: f.op, values: [...f.values] } : f.op === 'range' ? { fieldId: f.fieldId, op: f.op, ...(f.min !== undefined ? { min: f.min } : {}), ...(f.max !== undefined ? { max: f.max } : {}) } : f.op === 'contains' ? { fieldId: f.fieldId, op: f.op, value: f.value } : { fieldId: f.fieldId, op: f.op });
   const projected = { documentVersion: version, kind: 'model', id: m.id, revision: m.revision, title: m.title, datasetId: m.datasetId, datasetSchemaVersion: m.datasetSchemaVersion, datasetSemanticVersion: m.datasetSemanticVersion,
-    binding: { policy: 'latest', partitionIds: [...binding.partitionIds] }, visualization: v, filters, createdAt: m.createdAt, updatedAt: m.updatedAt };
+    binding: { policy: 'latest', partitionIds: [...binding.partitionIds] }, visualization: v, filters, ...(m.saveFilters !== undefined ? { saveFilters: m.saveFilters } : {}), ...(m.saveDataSelection !== undefined ? { saveDataSelection: m.saveDataSelection } : {}), createdAt: m.createdAt, updatedAt: m.updatedAt };
   const serialized = JSON.stringify(projected); check(serialized.length <= 256_000, 'Model too large'); return JSON.parse(serialized) as ModelDocument;
 }
 export function parseModelDocument(input: unknown, d: DatasetDescriptor): SavedModelDocument { return parseModel(input, d, 2) as SavedModelDocument; }

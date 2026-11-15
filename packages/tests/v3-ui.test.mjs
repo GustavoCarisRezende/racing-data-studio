@@ -29,7 +29,7 @@ test('profile UI routes round/visit crops after calculation, retains fourth dime
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
   const choose = async (label, value) => { const s = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === label)?.querySelector('select'); assert.ok(s, label); await act(async () => { s.value = value; s.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle(); };
   const click = async text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, text); await act(async () => b.click()); await settle(); };
-  const editModel = async () => { const b = document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]'); assert.ok(b); await act(async () => b.click()); await settle(); };
+  const editModel = async () => { await click('Saved models'); const b = document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]'); assert.ok(b); await act(async () => b.click()); await settle(); };
   const filter = async (field, value) => {
     const details = [...document.querySelectorAll('.rds-sb-quick-filter')].find(node => node.querySelector('summary').textContent.startsWith(field));
     assert.ok(details, field); await act(async () => details.querySelector('summary').click()); await settle();
@@ -53,13 +53,13 @@ test('profile UI routes round/visit crops after calculation, retains fourth dime
     assert.equal(document.querySelectorAll('tbody tr').length, 3);
     assert.ok(document.querySelector('tbody').textContent.includes('22.00'));
     assert.ok(document.querySelector('.rds-sb-filter-routing').textContent.includes('Display-only filters'));
-    assert.equal([...document.querySelectorAll('.rds-sb-dataset-list button')].find(b => b.textContent === 'Final visits').getAttribute('aria-pressed'), 'false', 'a legacy population preset must not be marked active for a v3 cumulative crop');
+    assert.equal(document.querySelectorAll('.rds-sb-dataset-list').length, 0, 'dataset views are not a separate panel');
     const save = [...document.querySelectorAll('button')].find(b => b.textContent === 'Save model');
     assert.ok(save.disabled);
     assert.ok(document.body.textContent.includes('requires AnalysisStore.modelsV3'));
     assert.deepEqual(await store.models.list(), []);
     await act(async () => root.render(createElement(Sandbox, { ...props, store: storeV3 }))); await settle();
-    await click('Save model');
+    await click('Save model'); await click('Confirm');
     const saved = await storeV3.modelsV3.load((await storeV3.modelsV3.list())[0].id);
     assert.equal(saved.documentVersion, 3);
     assert.deepEqual(saved.visualization.extraDimensions, ['phase']);

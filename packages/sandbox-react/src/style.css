@@ -71,7 +71,8 @@
 .rds-sb-chart figcaption { margin-top:7px; }
 .rds-sb-legend-scroll { margin:0 0 5px; }
 .rds-sb-model-cards { display:grid; gap:6px; }
-.rds-sb-model-card { display:flex; align-items:flex-start; gap:6px; border:1px solid #384153; border-radius:6px; padding:8px; overflow-wrap:anywhere; }
+.rds-sb-model-card { display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px; border:1px solid #384153; border-radius:6px; padding:8px; overflow-wrap:anywhere; }
+.rds-sb-legacy-note { flex-basis:100%; color:#b8c1d1; }
 .rds-sb-model-card details { min-width:0; flex:1; }
 .rds-sb-card-icons { display:flex; gap:3px; }
 .rds-sb-card-icons button { padding:4px; }
@@ -143,3 +144,6 @@
 .rds-sb-config { align-items:start; }
 .rds-sb-confirm { position:sticky; top:12px; z-index:5; margin:8px; padding:20px; background:#242c3b; border:2px solid #ff7997; border-radius:8px; }
 .rds-sb-confirm button { margin:4px; }
+.rds-sb-modal-backdrop { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; background:rgba(0,0,0,.7); padding:20px; }
+.rds-sb-modal-backdrop .rds-sb-confirm { position:static; max-width:480px; width:100%; max-height:90vh; overflow:auto; margin:0; box-sizing:border-box; }
+.rds-sb-model-open { flex:1; min-width:0; text-align:left; overflow-wrap:anywhere; }

@@ -75,6 +75,14 @@ Guia de integração completo: [docs/SANDBOX_INTEGRATION.md](../docs/SANDBOX_INT
 [SANDBOX_UI_RECOVERY.md](../docs/SANDBOX_UI_RECOVERY.md).
 Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
 
+Os modelos v2/v3 aceitam `saveFilters` e `saveDataSelection`, booleanos
+opcionais que o store deve preservar. Ausência equivale a `true` para documentos
+anteriores. O campo de seleção principal é o `multiSelection.fieldId` ou, na
+ausência dele, `presentation.primaryFilterFieldId`: seu filtro é salvo e
+restaurado conforme `saveDataSelection`; os demais seguem `saveFilters`.
+Com `saveDataSelection: false`, `binding.partitionIds` é salvo vazio e a
+seleção corrente é mantida ao abrir um modelo do mesmo dataset.
+
 ## Funcionalidades efetivas
 
 - Catálogo e metadados por provider; dimensões e métricas não são inferidas do nome.
@@ -106,7 +114,9 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
   o ano/dimensão selecionada na identidade de grupos. Não limitada a duas temporadas.
 - Colunas selecionáveis e reordenáveis por teclado, ordenação decimal exata antes da
   paginação. Configuração `table.version: 1` persistida nos modelos v2/v3, nunca em v1.
-- CSV UTF-8 + manifesto de consulta, métricas, licença, limitações e revisões.
+- A UI exporta a tabela como um único CSV UTF-8; gráficos podem ser exportados
+  como SVG ou PNG pelo serviço injetado. As funções de núcleo que geram manifesto
+  continuam disponíveis para consumidores existentes.
 - PT-BR e en-US; metadata traduzível, formatação exata de decimais, datas sem desvio
   de fuso e controles nativos por teclado. Trocar idioma não limpa a análise.
 - Três painéis 20/60/20 em containers ≥1100px; dois em ≥750px; empilhados abaixo
@@ -118,8 +128,8 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
   padrões ausentes só por ação explícita/capacidade do host e com lista atualizada.
 - Medidas calculadas usam `RunningSumProfile.measureLabel` no mesmo seletor de
   métricas, sem expor um editor técnico de perfis nem reinterpretar documentos antigos.
-- Aviso de alterações não salvas e confirmação ao substituir a edição/excluir
-  modelos; `host.confirm` opcional com fallback local e `host.onDirtyChange` para o shell.
+- Aviso de alterações não salvas e confirmação modal ao substituir a edição/excluir
+  modelos; `host.onDirtyChange` continua disponível para o shell.
 - Nomes de entidades via `labelField`; códigos traduzidos por `valueLabels`;
   identidades permanecem estáveis nos filtros e consultas.
 - AbortSignals, descarte de respostas antigas, debounce de queries/facetas,
@@ -136,7 +146,7 @@ Revisão de dependências e CSP: [SECURITY.md](SECURITY.md).
 - Acumulados F1 e a garantia latest precisam ser implementados no provider por Terra;
   esta alteração de biblioteca não os habilita no adapter existente em `app/`.
 - Sem fórmulas, SQL, plugins executáveis, média móvel, dashboards,
-  importação de arquivos, PNG/SVG/PDF/XLSX ou autosave.
+  importação de arquivos, PDF/XLSX ou autosave.
 - Queries v1/v2 não têm cursor de resultados. O provider deve retornar um agregado
   completo dentro do limite ou lançar `LIMIT_EXCEEDED`. Um resultado incompleto
   pode ser inspecionado como tabela, mas não vira gráfico, análise salva ou exportação.

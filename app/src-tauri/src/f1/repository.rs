@@ -126,7 +126,9 @@ impl F1Repository {
                     }
                 }
             }
-            snapshots.push(serde_json::json!({"year": year, "id": id.to_string(), "storedAt": stored_at, "sourceDataAt": source_at, "calendar": calendar, "results": results}));
+            // Read-time pagination/structure validation only; this does not assert
+            // semantic completeness from the source. No stored document is rewritten.
+            snapshots.push(serde_json::json!({"year": year, "id": id.to_string(), "storedAt": stored_at, "sourceDataAt": source_at, "calendar": calendar, "results": results, "integrity": {"validatedEndpoints": ["races", "results", "sprint"]}}));
         }
         tx.commit()?;
         Ok(snapshots)
@@ -622,6 +624,7 @@ mod tests {
         repo.save(2024, &season(&[1], &["a", "a"])).unwrap();
         let frozen = repo.analysis_snapshots().unwrap();
         assert_eq!(frozen[0]["results"].as_array().unwrap().len(), 2);
+        assert_eq!(frozen[0]["integrity"]["validatedEndpoints"], serde_json::json!(["races", "results", "sprint"]));
         repo.save(2024, &season(&[1, 2], &["a", "a", "b"])).unwrap();
         let current = repo.analysis_snapshots().unwrap();
         assert_ne!(frozen[0]["id"], current[0]["id"]);

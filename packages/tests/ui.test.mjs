@@ -5,7 +5,9 @@ import { JSDOM } from 'jsdom';
 import { createElement, act } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Sandbox } from '@rds/sandbox-react';
-import { fixture } from './helpers.mjs';
+import { fixture, descriptor, rows } from './helpers.mjs';
+import { createMemoryProvider, createMemoryStore } from '../examples/memory-provider.mjs';
+const latestFixture = () => { const d = structuredClone(descriptor); d.capabilities.latestSelection = true; return { provider: createMemoryProvider(d, rows), store: createMemoryStore(d) }; };
 
 test('SSR shell is accessible, localized and hides unavailable services', () => {
   const { provider } = fixture();
@@ -26,7 +28,7 @@ test('React lifecycle: provider query, config change, typed filter, save/open, e
   }
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root'));
-  const { provider, store } = fixture();
+  const { provider, store } = latestFixture();
   const exported = [];
   let capturedModel;
   function Renderer({ model }) { capturedModel = model; return createElement('div', { role: 'img', 'aria-label': model.description }, 'Chart'); }
@@ -46,20 +48,22 @@ test('React lifecycle: provider query, config change, typed filter, save/open, e
     assert.equal(dom.window.document.querySelectorAll('tbody tr').length, 3);
     assert.ok(dom.window.document.body.textContent.includes('39.60'));
     assert.ok(!dom.window.document.querySelector('[role=alert]'));
+    await click('Line');
     await select('Group by', 'plot');
     await select('Compare by', 'campaign');
-    await click('Line');
     assert.equal(capturedModel.series.length, 4);
-    await click('Save analysis');
-    assert.ok(dom.window.document.body.textContent.includes('Analysis saved.'));
-    assert.equal((await store.list()).length, 1);
-    await click('Export complete CSV + manifest');
+    await click('Save model'); await click('Confirm');
+    assert.ok(dom.window.document.body.textContent.includes('Model saved.'));
+    assert.equal((await store.models.list()).length, 1);
+    await click('Table'); await click('Export');
     assert.equal(exported.length, 1);
-    assert.equal(JSON.parse(exported[0][1].text).rowCount, 11);
-    await select('Group by', '');
-    await click('Open');
+    assert.equal(exported[0].length, 1); assert.ok(exported[0][0].mediaType.startsWith('text/csv'));
+    await select('Recalculate by', 'plot');
+    await click('Saved models');
+    await act(async () => document.querySelector('.rds-sb-model-open').click()); await settle();
+    await click('Confirm');
     assert.equal(capturedModel.series.length, 4);
-    assert.ok(dom.window.document.body.textContent.includes('Saved analysis opened.'));
+    assert.ok(dom.window.document.body.textContent.includes('Model opened'));
     await click('Edit mode');
     await click('Table');
     // Choose an integer membership filter via faceted values, not string parsing.
@@ -111,7 +115,7 @@ test('stale results never replace a newer query; partial results block save and 
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root'));
-  const { provider, store } = fixture();
+  const { provider, store } = latestFixture();
   const original = provider.query;
   let first = true, finish, partial = false;
   provider.query = async q => {
@@ -133,6 +137,6 @@ test('stale results never replace a newer query; partial results block save and 
     assert.ok(!dom.window.document.body.textContent.includes('39.60'));
     partial = true; await chooseAggregation('sum');
     assert.ok(dom.window.document.body.textContent.includes('Incomplete result'));
-    for (const label of ['Save analysis', 'Export complete CSV + manifest']) assert.equal([...dom.window.document.querySelectorAll('button')].find(button => button.textContent === label).disabled, true);
+    for (const label of ['Save model', 'Export']) assert.equal([...dom.window.document.querySelectorAll('button')].find(button => button.textContent === label).disabled, true);
   } finally { await act(async () => root.unmount()); globalThis.window = oldWindow; globalThis.document = oldDocument; delete globalThis.IS_REACT_ACT_ENVIRONMENT; dom.window.close(); }
 });

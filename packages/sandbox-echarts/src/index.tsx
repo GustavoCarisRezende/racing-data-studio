@@ -26,7 +26,7 @@ export function renderExportSvg(model: ChartModel, options: Pick<ImageExportOpti
   if (model.categories.length > 20_000 || (model.slices?.length ?? 0) > 100) throw new Error('Chart exceeds export limits');
   for (const category of model.categories) addText(category.label);
   let pointCount = 0;
-  for (const series of model.series) { addText(series.label); pointCount += series.points?.length ?? 0; if (pointCount > 20_000) throw new Error('Chart exceeds export limits'); for (const point of series.points ?? []) addText(point.label); }
+  for (const series of model.series) { addText(series.label); for (const label of series.valueLabels ?? []) addText(label); pointCount += series.points?.length ?? 0; if (pointCount > 20_000) throw new Error('Chart exceeds export limits'); for (const point of series.points ?? []) addText(point.label); }
   for (const slice of model.slices ?? []) addText(slice.label);
   const width = 1200, chartHeight = 600, titleHeight = 46;
   const legend: string[] = [];
@@ -44,7 +44,7 @@ export function renderExportSvg(model: ChartModel, options: Pick<ImageExportOpti
   const height = options.showLegend ? Math.max(titleHeight + chartHeight, y + 8) : titleHeight + chartHeight;
   const visibleModel: ChartModel = { ...model, title: cleanXml(model.title), description: cleanXml(model.description), xLabel: cleanXml(model.xLabel), yLabel: cleanXml(model.yLabel),
     categories: model.categories.map(c => ({ ...c, label: cleanXml(c.label) })),
-    series: model.series.map(s => ({ ...s, label: cleanXml(s.label), ...(s.points ? { points: s.points.map(p => ({ ...p, label: cleanXml(p.label) })) } : {}) })),
+    series: model.series.map(s => ({ ...s, label: cleanXml(s.label), ...(s.valueLabels ? { valueLabels: s.valueLabels.map(cleanXml) } : {}), ...(s.points ? { points: s.points.map(p => ({ ...p, label: cleanXml(p.label) })) } : {}) })),
     ...(model.slices ? { slices: model.slices.map(s => ({ ...s, label: cleanXml(s.label) })) } : {}),
     ...(model.kind === 'pie' ? { piePresentation: { showLegend: options.showLegend, showLabels: options.showLabels } } : {}) };
   const chart = echarts.init(null, undefined, { renderer: 'svg', ssr: true, width, height: chartHeight });
@@ -115,21 +115,26 @@ export function toEChartsOption(model: ChartModel): SandboxChartOption {
     aria: { enabled: true, label: { enabled: true, description: model.description }, decal: { show: true } },
     grid: { left: 60, right: 18, top: 22, bottom: 52 },
     // No HTML interpolation, callbacks from documents, CSS strings or URL actions.
-    tooltip: { trigger: 'axis', renderMode: 'richText', confine: true },
+    tooltip: { trigger: 'item', renderMode: 'richText', confine: true },
     legend: { show: false, selectedMode: false },
     xAxis: { type: 'category', name: model.xLabel, nameLocation: 'middle', nameGap: 40, data: model.categories.map(c => c.label), axisLabel: { color: '#b8c1d1', hideOverlap: true }, axisLine: { lineStyle: { color: '#535d70' } } },
     yAxis: { type: 'value', name: model.yLabel, nameLocation: 'middle', nameGap: 43, nameTextStyle: { color: '#b8c1d1', fontSize: 11 }, axisLabel: { color: '#b8c1d1' }, splitLine: { lineStyle: { color: '#384153' } } },
     series: model.series.map((s, index) => ({
       id: s.id, name: s.label, type: model.kind,
-      data: s.values, ...(model.kind === 'line' ? { connectNulls: false, smooth: false, showSymbol: true, symbol: ['circle', 'rect', 'triangle', 'diamond'][index % 4], lineStyle: { type: index % 2 ? 'dashed' : 'solid' } } : {}),
+      data: s.values.map((value, i) => value === null ? null : ({ value, name: s.valueLabels?.[i] ?? model.categories[i]?.label })), ...(model.kind === 'line' ? { connectNulls: false, smooth: false, showSymbol: true, symbol: ['circle', 'rect', 'triangle', 'diamond'][index % 4], lineStyle: { type: index % 2 ? 'dashed' : 'solid' } } : {}),
       emphasis: { disabled: true },
     } as BarSeriesOption | LineSeriesOption)),
   };
 }
 
-export function EChartsRenderer({ model, locale }: { model: ChartModel; locale: string }) {
+export function EChartsRenderer({ model, locale, onVisibleModelChange, legendSelection }: { model: ChartModel; locale: string; onVisibleModelChange?: (model: ChartModel) => void; legendSelection?: { fieldId: string; options: { value: string | number | boolean; label: string }[]; selected: (string | number | boolean)[]; disabled: boolean; onToggle: (value: string | number | boolean) => void } }) {
   const container = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  useEffect(() => { setSelected([]); }, [model]);
+  useEffect(() => {
+    onVisibleModelChange?.(!legendSelection && selected.length ? { ...model, series: model.series.filter(s => selected.includes(s.id)), ...(model.slices ? { slices: model.slices.filter(s => selected.includes(s.id)) } : {}) } : model);
+  }, [model, selected, onVisibleModelChange, legendSelection]);
   useEffect(() => {
     const node = container.current;
     if (!node) return;
@@ -144,10 +149,20 @@ export function EChartsRenderer({ model, locale }: { model: ChartModel; locale: 
       setFailed(false);
       chart = echarts.init(node, undefined, { renderer: 'svg', locale: locale.startsWith('pt') ? 'PT-br' : 'EN', width: node.clientWidth || 640, height: node.clientHeight || 340 });
       chart.setOption(toEChartsOption(model), { notMerge: true });
+      if (!legendSelection && selected.length) {
+        if (model.kind === 'pie') {
+          chart.setOption({ series: [{ type: 'pie', data: model.slices?.filter(s => selected.includes(s.id)).map(s => ({ id: s.id, name: s.label, value: s.value })) }] });
+        } else {
+          chart.setOption({ series: model.series.map(s => ({ id: s.id, ...(!selected.includes(s.id) ? { data: [] } : {}) })) });
+        }
+      }
       if (typeof ResizeObserver !== 'undefined') { observer = new ResizeObserver(resize); observer.observe(node); }
       else window.addEventListener('resize', resize);
     } catch { setFailed(true); }
     return () => { observer?.disconnect(); window.removeEventListener('resize', resize); chart?.dispose(); };
-  }, [model, locale]);
-  return <>{failed && <p role="alert">{locale.startsWith('pt') ? 'Não foi possível renderizar o gráfico. Consulte a tabela.' : 'The chart could not be rendered. Use the table.'}</p>}<div ref={container} className="rds-sb-chart-surface" role="img" aria-label={model.description} />{(model.kind !== 'pie' || model.piePresentation?.showLegend !== false) && <div className="rds-sb-legend-scroll" role="region" aria-label={locale.startsWith('pt') ? 'Legenda do gráfico' : 'Chart legend'}><ul className="rds-sb-legend">{model.series.map((series, index) => <li key={series.id}><svg width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" stroke={colors[index % colors.length]} strokeWidth="3" strokeDasharray={index % 2 ? '4 2' : undefined} /></svg>{series.label}</li>)}</ul></div>}</>;
+  }, [model, locale, selected, Boolean(legendSelection)]);
+  return <>{failed && <p role="alert">{locale.startsWith('pt') ? 'Não foi possível renderizar o gráfico. Consulte a tabela.' : 'The chart could not be rendered. Use the table.'}</p>}<div ref={container} className="rds-sb-chart-surface" role="img" aria-label={model.description} />{(model.kind !== 'pie' || model.piePresentation?.showLegend !== false) && <div className="rds-sb-legend-scroll" role="region" aria-label={locale.startsWith('pt') ? 'Legenda do gráfico' : 'Chart legend'}><ul className="rds-sb-legend">{legendSelection ? legendSelection.options.map(item => {
+    const matches = model.series.flatMap((series, index) => series.dimensions?.[legendSelection.fieldId] === item.value ? [index] : []);
+    return <li key={JSON.stringify(item.value)}><button type="button" disabled={legendSelection.disabled} aria-pressed={legendSelection.selected.includes(item.value)} onClick={() => legendSelection.onToggle(item.value)}>{matches.length > 0 && <svg width={matches.length * 18} height="8" aria-hidden="true">{matches.map((index, i) => <line key={index} x1={i * 18} y1="4" x2={(i + 1) * 18} y2="4" stroke={colors[index % colors.length]} strokeWidth="3" strokeDasharray={model.kind === 'line' && index % 2 ? '4 2' : undefined} />)}</svg>}{item.label}</button></li>;
+  }) : model.series.map((series, index) => <li key={series.id}><button type="button" aria-pressed={selected.includes(series.id)} onClick={() => setSelected(selected.includes(series.id) ? selected.filter(id => id !== series.id) : [...selected, series.id])}><svg width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" stroke={colors[index % colors.length]} strokeWidth="3" strokeDasharray={index % 2 ? '4 2' : undefined} /></svg>{series.label}</button></li>)}</ul></div>}</>;
 }

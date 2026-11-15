@@ -110,6 +110,9 @@ export interface DatasetDescriptor extends DatasetSummary {
     latestSelection?: boolean;
     /** Values come from facet(); this dimension can never be aggregated away. */
     multiSelection?: { fieldId: string; maxValues: number };
+    /** Provider can collapse this dimension after calculation. Required values must be explicitly
+     * selected to enable the control. Provider owns chronology and consolidation semantics. */
+    eventUnification?: { fieldId: string; requiredValues: Exclude<Scalar, null>[] };
   };
 }
 export type Filter =
@@ -163,6 +166,10 @@ export interface QueryRequest {
     /** v3 only. Defines chronology and partition; orderBy above remains the display axis. */
     profileId?: string;
   };
+  /** Collapse event rows after calculation; running sums use the last chronological value, never their sum.
+   * Simple measures are aggregated from source observations. Unknown values remain unknown.
+   * Keep the declared dimensions, with a consistent valid fieldId value in unified rows. */
+  unifyEvents?: boolean;
   limit: number;
 }
 export interface ResultColumn {
@@ -214,6 +221,8 @@ export interface VisualizationSpec {
   series: string | null;
   comparison: string | null;
   runningSum: boolean;
+  /** Optional persisted preference; inactive when the required event selection is absent. */
+  unifyEvents?: boolean;
   /** Scatter's numeric X measure. `metric` is numeric Y; `x` remains observation grain. */
   secondaryMetric?: MetricSelection;
   cumulativeScope?: 'filteredSelection' | 'beforeDisplayFilter';
@@ -262,6 +271,8 @@ export interface AnalysisDocument {
 export interface AnalysisSummary { id: string; revision: string; title: string; updatedAt: string }
 /** Models contain no snapshot references. They bind to latest data at OPEN time. */
 export interface SavedModelDocument {
+  saveFilters?: boolean;
+  saveDataSelection?: boolean;
   documentVersion: 2;
   kind: 'model';
   id: string;
@@ -325,4 +336,4 @@ export class SandboxError extends Error {
     this.name = 'SandboxError';
   }
 }
-export { assertDataset, assertCatalog, assertAnalysisList, assertSelection, assertQuery, assertResult, assertVisualization, parseAnalysisDocument, parseModelDocument, parseModelDocumentV3, parseSavedModelDocument, visualizationDimensions, configurationQuery, assertFacetPage, compareDecimal, isScalarOfType } from './validation.js';
+export { assertDataset, assertCatalog, assertAnalysisList, assertSelection, assertQuery, assertResult, assertVisualization, parseAnalysisDocument, parseModelDocument, parseModelDocumentV3, parseSavedModelDocument, visualizationDimensions, configurationQuery, eventUnificationAvailable, assertFacetPage, compareDecimal, isScalarOfType } from './validation.js';

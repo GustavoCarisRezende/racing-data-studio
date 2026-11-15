@@ -1,10 +1,11 @@
 import { assertDataset, assertQuery, assertSelection, compareDecimal, isScalarOfType, SandboxError } from '@rds/sandbox-contracts';
 import type { DatasetDescriptor, FacetRequest, Filter, QueryRequest, ResolvedSelection, RevisionReference, SandboxDataProvider, Scalar, SelectionRequest } from '@rds/sandbox-contracts';
 
-type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null } }[] };
+type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; integrity?: { validatedEndpoints?: string[] }; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null } }[] };
 type Row = Record<string, Scalar>;
 const text = (fallback: string, pt: string) => ({ fallback, translations: { 'pt-BR': pt } });
 const dimensions = ['season', 'round', 'session', 'driver', 'team'];
+const allSessionFilter = { fieldId: 'session', op: 'in' as const, values: ['results', 'sprint'] };
 export const descriptor: DatasetDescriptor = {
   protocolVersion: 1, id: 'f1.session_results', schemaVersion: '1', semanticVersion: '1',
   label: text('F1 session results', 'Resultados de sessões F1'),
@@ -27,15 +28,15 @@ export const descriptor: DatasetDescriptor = {
     { id: 'observations', label: text('Result occurrences', 'Ocorrências de resultado'), description: text('Number of source result occurrences.', 'Quantidade de ocorrências de resultado da fonte.'), fieldId: 'occurrence_raw', aggregations: ['count'], defaultAggregation: 'count', groupableBy: dimensions, requiredDimensions: ['season'], nullPolicy: 'ignore', additive: false, supportsRunningSum: false },
   ],
   sources: [{ name: 'Jolpica F1', attribution: 'Jolpica F1 API contributors', license: 'CC BY-NC-SA 4.0', url: 'https://github.com/jolpica/jolpica-f1' }],
-  limitations: [text('Only imported results; missing events are not zero. Points sums are not official standings. Team IDs do not imply historical continuity. Round does not identify the same circuit across seasons.', 'Somente resultados importados; eventos ausentes não são zero. A soma de pontos não é classificação oficial. IDs de equipe não implicam continuidade histórica. Rodada não identifica o mesmo circuito entre temporadas.'), text('Cumulative values use observed results only, propagate null points, and require unambiguous source session timestamps. Population filters may exclude results.', 'Acumulados usam apenas resultados observados, propagam pontos nulos e exigem horários inequívocos das sessões na fonte. Filtros de população podem excluir resultados.')],
-  capabilities: { charts: ['table', 'line', 'bar', 'pie', 'scatter'], maxDimensions: 5, maxRows: 5000, maxSeries: 100, comparisonDimensions: ['season'], runningSum: true, completeGroupedQueries: true, latestSelection: true, multiSelection: { fieldId: 'season', maxValues: 20 }, queryVersions: [1, 3], runningSumProfiles: [
-    { version: 1, id: 'driver-all-sessions-v1', groupingFamily: 'driver-points-v1', groupingField: 'driver', label: text('Driver points by session', 'Pontos do piloto por sessão'), description: text('All observed previous sessions; round and session only crop the display. Not official standings.', 'Todas as sessões observadas anteriores; rodada e sessão apenas recortam a exibição. Não é classificação oficial.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
-    { version: 1, id: 'driver-sessions-by-team-v1', groupingFamily: 'driver-points-v1', groupingField: 'team', label: text('Driver points by team and session', 'Pontos do piloto por equipe e sessão'), measureLabel: text('Points after the event', 'Pontos após o evento'), description: text('Team identifies each driver’s result in that session; values remain driver totals, never team totals. Team changes do not reset accumulation. Ambiguous team assignments are rejected.', 'Equipe identifica o resultado de cada piloto na sessão; valores são totais do piloto, nunca da equipe. Mudanças de equipe não reiniciam o acumulado. Vínculos ambíguos são recusados.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session', 'team'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session', 'team'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
+  limitations: [text('Only imported results; missing events are not assumed to be zero. Points sums are not official standings. Team IDs do not imply historical continuity. Round does not identify the same circuit across seasons.', 'Somente resultados importados; eventos ausentes não são presumidos como zero. A soma de pontos não é classificação oficial. IDs de equipe não implicam continuidade histórica. Rodada não identifica o mesmo circuito entre temporadas.'), text('Only the all-sessions driver cumulative profile carries prior totals for past sessions with validated endpoint integrity and results for other drivers. The team profile does not carry absences because the missing team assignment is unknown. Unknown coverage and explicit null points remain gaps; source-side partial lists without an integrity signal cannot be detected. Session timestamps must be unambiguous. Population filters may exclude results.', 'Somente o perfil acumulado de piloto em todas as sessões carrega totais anteriores para sessões passadas com integridade do endpoint validada e resultados de outros pilotos. O perfil por equipe não carrega ausências porque a equipe do resultado ausente é desconhecida. Cobertura desconhecida e pontos explicitamente nulos continuam lacunas; listas parciais da fonte sem sinal de integridade não podem ser detectadas. Os horários das sessões devem ser inequívocos. Filtros de população podem excluir resultados.')],
+  capabilities: { charts: ['table', 'line', 'bar', 'pie', 'scatter'], maxDimensions: 5, maxRows: 5000, maxSeries: 100, comparisonDimensions: ['season'], runningSum: true, completeGroupedQueries: true, latestSelection: true, multiSelection: { fieldId: 'season', maxValues: 20 }, eventUnification: { fieldId: 'session', requiredValues: ['results', 'sprint'] }, queryVersions: [1, 3], runningSumProfiles: [
+    { version: 1, id: 'driver-all-sessions-v1', groupingFamily: 'driver-points-v1', groupingField: 'driver', label: text('Driver points by session', 'Pontos do piloto por sessão'), description: text('All prior sessions; validated past absences may carry the previous total, while unknown data remains a gap. Round and session only crop the display. Not official standings.', 'Todas as sessões anteriores; ausências passadas validadas podem carregar o total anterior, enquanto dados desconhecidos permanecem lacuna. Rodada e sessão apenas recortam a exibição. Não é classificação oficial.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
+    { version: 1, id: 'driver-sessions-by-team-v1', groupingFamily: 'driver-points-v1', groupingField: 'team', label: text('Driver points by team and session', 'Pontos do piloto por equipe e sessão'), measureLabel: text('Points after the event', 'Pontos após o evento'), description: text('Team identifies each driver’s result in that session; values remain driver totals, never team totals. Team changes do not reset accumulation. Missing sessions are not carried because the absent result’s team assignment is unknown; ambiguous assignments are rejected.', 'Equipe identifica o resultado de cada piloto na sessão; valores são totais do piloto, nunca da equipe. Mudanças de equipe não reiniciam o acumulado. Sessões ausentes não são carregadas porque a equipe do resultado ausente é desconhecida; vínculos ambíguos são recusados.'), metricId: 'points', axisFieldId: 'round', dimensions: ['round', 'driver', 'season', 'session', 'team'], partitionBy: ['driver', 'season'], orderDimensions: ['round', 'session', 'team'], chronology: { id: 'validated-local-session-calendar-v1', missing: 'reject' }, displayFilterFields: ['round', 'session'] },
   ] },
   presentation: {
     primaryFilterFieldId: 'season',
     filters: [{ fieldId: 'driver', label: text('Drivers', 'Pilotos') }, { fieldId: 'team', label: text('Teams', 'Equipes') }, { fieldId: 'round', label: text('Rounds', 'Rodadas') }, { fieldId: 'session', label: text('Sessions', 'Sessões') }],
-    defaultVisualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', runningSum: false },
+    defaultVisualization: { kind: 'line', x: 'round', metric: { metricId: 'points', aggregation: 'sum' }, series: 'driver', comparison: 'season', runningSum: false, unifyEvents: true },
   },
 };
 // Preserve legacy literal-ID text filter semantics; name search belongs to the faceted picker.
@@ -92,17 +93,19 @@ function aggregatePoints(values: Scalar[], aggregation: 'sum' | 'mean' | 'min' |
 }
 
 /** The injected reader is the only native boundary; snapshots are held immutable in this instance. */
-export function createF1AnalysisProvider(read: (revisions?: RevisionReference[]) => Promise<Snapshot[]>): SandboxDataProvider {
-  let frozen: { selection: ResolvedSelection; rows: Row[]; chronology: Map<string, number | null> } | undefined;
+export function createF1AnalysisProvider(read: (revisions?: RevisionReference[]) => Promise<Snapshot[]>, now: () => number = Date.now): SandboxDataProvider {
+  let frozen: { selection: ResolvedSelection; rows: Row[]; chronology: Map<string, number | null>; integrity: Map<string, Set<string>> } | undefined;
   let pending: Promise<typeof frozen> | undefined;
   const selections = new Map<string, NonNullable<typeof frozen>>();
   async function project(snapshots: Snapshot[]) {
       const rows: Row[] = [];
       const chronology = new Map<string, number | null>();
+      const integrity = new Map<string, Set<string>>();
       const revisions = snapshots.map(s => ({ partitionId: String(s.year), revisionId: s.id, sourceDataAt: s.sourceDataAt, storedAt: s.storedAt }));
       const selection: ResolvedSelection = { protocolVersion: 1, datasetId: descriptor.id, token: crypto.randomUUID(), transformationVersion: 'f1-results-1', revisions };
       assertSelection(selection);
       for (const s of snapshots) {
+        integrity.set(String(s.year), new Set(s.integrity?.validatedEndpoints ?? []));
       const roundNames = new Map<number, string>();
       for (const event of s.calendar ?? []) {
         if (event.raceName != null && (typeof event.raceName !== 'string' || event.raceName.length > 400)) throw new SandboxError('INVALID_CONTRACT', 'Invalid event name');
@@ -127,7 +130,7 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
         if (rows.length > 100_000) throw new SandboxError('LIMIT_EXCEEDED', 'Too many occurrences');
       }
       }
-      return { selection, rows, chronology };
+      return { selection, rows, chronology, integrity };
   }
   async function load() {
     if (!pending) pending = (async () => {
@@ -151,10 +154,11 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       const sessions = new Set(data.rows.map(row => row.session));
       const visualization = result.presentation!.defaultVisualization!;
       result.presentation!.views = [];
-      if (sessions.has('results')) result.presentation!.views.push({ id: 'race', label: text('Race results', 'Resultados de corrida'), filters: [{ fieldId: 'session', op: 'in', values: ['results'] }], visualization });
-      if (sessions.has('sprint')) result.presentation!.views.push({ id: 'sprint', label: text('Sprint results', 'Resultados de sprint'), filters: [{ fieldId: 'session', op: 'in', values: ['sprint'] }], visualization });
-      if (data.rows.some(row => row.team !== null)) result.presentation!.views.push({ id: 'teams', label: text('Points by team', 'Pontuação por equipe'), filters: sessions.has('results') ? [{ fieldId: 'session', op: 'in', values: ['results'] }] : [], visualization: { ...visualization, series: 'team' } });
-      result.presentation!.defaultFilters = [...(latest ? [{ fieldId: 'season', op: 'in' as const, values: [latest] }] : []), ...(result.presentation!.views[0]?.filters ?? [])];
+      if (sessions.size > 0) result.presentation!.views.push({ id: 'events', label: text('Event results', 'Resultados dos eventos'), filters: [structuredClone(allSessionFilter)], visualization });
+      if (sessions.has('results')) result.presentation!.views.push({ id: 'race', label: text('Race results', 'Resultados de corrida'), filters: [{ fieldId: 'session', op: 'in', values: ['results'] }], visualization: { ...visualization, unifyEvents: false } });
+      if (sessions.has('sprint')) result.presentation!.views.push({ id: 'sprint', label: text('Sprint results', 'Resultados de sprint'), filters: [{ fieldId: 'session', op: 'in', values: ['sprint'] }], visualization: { ...visualization, unifyEvents: false } });
+      if (data.rows.some(row => row.team !== null)) result.presentation!.views.push({ id: 'teams', label: text('Points by team', 'Pontuação por equipe'), filters: [structuredClone(allSessionFilter)], visualization: { ...visualization, series: 'team' } });
+      result.presentation!.defaultFilters = [...(latest ? [{ fieldId: 'season', op: 'in' as const, values: [latest] }] : []), structuredClone(allSessionFilter)];
       assertDataset(result); return result;
     },
     async resolveSelection(request: SelectionRequest, signal) {
@@ -179,9 +183,46 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
     },
     async query(q: QueryRequest, signal) {
       abort(signal); assertQuery(q, descriptor); const groups = new Map<string, Row[]>();
+      if (q.unifyEvents) {
+        const eventField = descriptor.capabilities.eventUnification!.fieldId;
+        const sessionFilters = [...q.filters, ...(q.displayFilters ?? [])].filter(filter => filter.fieldId === eventField);
+        const selectedSessions = sessionFilters.length > 0 && sessionFilters.every(filter =>
+          filter.op === 'in' && descriptor.capabilities.eventUnification!.requiredValues.every(value => filter.values.includes(value)));
+        if (!selectedSessions) throw new SandboxError('INVALID_QUERY', 'Unifying events requires an explicit selection of race and sprint sessions.', eventField);
+      }
       if (q.window && q.filters.some(f => f.fieldId === 'team')) throw new SandboxError('INVALID_QUERY', 'Team filters cannot be used for cumulative points; remove the team filter.', 'team');
       const data = selected(q.selection);
-      for (const row of data.rows) if (matches(row, q.filters)) { const key = JSON.stringify(q.dimensions.map(k => row[k])); const group = groups.get(key) ?? []; group.push(row); groups.set(key, group); }
+      let sourceRows = data.rows;
+      if (q.window?.scope === 'profile' && q.window.profileId === 'driver-all-sessions-v1') {
+        const synthetic: Row[] = [];
+        const partitions = new Map<string, Row[]>();
+        const eventsBySeason = new Map<string, Map<string, Row[]>>();
+        for (const row of data.rows) {
+          const driverKey = JSON.stringify([row.season, row.driver]);
+          const driverGroup = partitions.get(driverKey) ?? []; driverGroup.push(row); partitions.set(driverKey, driverGroup);
+          const eventKey = JSON.stringify([row.round, row.session]);
+          const seasonEvents = eventsBySeason.get(String(row.season)) ?? new Map<string, Row[]>();
+          const eventGroup = seasonEvents.get(eventKey) ?? []; eventGroup.push(row); seasonEvents.set(eventKey, eventGroup);
+          eventsBySeason.set(String(row.season), seasonEvents);
+        }
+        for (const [partition, driverRows] of partitions) {
+          const [season, driver] = JSON.parse(partition) as [string, string | null];
+          if (driver === null || !data.integrity.get(season)?.has('results')) continue;
+          const knownSessions = new Set(driverRows.map(row => JSON.stringify([row.round, row.session])));
+          const firstKnownTime = driverRows.reduce((earliest, row) => Math.min(earliest, data.chronology.get(JSON.stringify([season, row.round, row.session])) ?? Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY);
+          for (const [eventSession, eventRows] of eventsBySeason.get(season) ?? []) {
+            if (knownSessions.has(eventSession)) continue;
+            const [round, session] = JSON.parse(eventSession) as [number, string];
+            const timestamp = data.chronology.get(JSON.stringify([season, round, session]));
+            if (timestamp == null || timestamp > now() || firstKnownTime >= timestamp) continue;
+            const hasValidatedSessionData = data.integrity.get(season)?.has(session === 'sprint' ? 'sprint' : 'results');
+            if (!hasValidatedSessionData || !eventRows.length) continue;
+            synthetic.push({ season, round, round_name: eventRows[0].round_name, session, driver, driver_name: driverRows.find(row => row.driver_name !== null)?.driver_name ?? driver, team: null, team_name: null, points_raw: '0', occurrence_raw: 0 });
+          }
+        }
+        sourceRows = [...data.rows, ...synthetic];
+      }
+      for (const row of sourceRows) if (matches(row, q.filters)) { const key = JSON.stringify(q.dimensions.map(k => row[k])); const group = groups.get(key) ?? []; group.push(row); groups.set(key, group); }
       let output = [...groups.entries()].map(([key, group], index) => {
         const values: Row = Object.fromEntries(q.dimensions.map(k => [k, group[0][k]]));
         for (const id of q.dimensions) { const label = descriptor.fields.find(f => f.id === id)?.labelField; if (label) values[label] = group.find(row => row[label] !== null)?.[label] ?? null; }
@@ -215,13 +256,66 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
           totals.set(key, next); row.values[window.metricId] = next;
         }
       }
+      if (q.unifyEvents && q.dimensions.includes(descriptor.capabilities.eventUnification!.fieldId)) {
+        const sessionField = descriptor.capabilities.eventUnification!.fieldId;
+        const groupingDimensions = q.dimensions.filter(id => id !== sessionField);
+        const eventGroups = new Map<string, typeof output>();
+        for (const row of output) {
+          const key = JSON.stringify(groupingDimensions.map(id => row.values[id]));
+          const group = eventGroups.get(key) ?? []; group.push(row); eventGroups.set(key, group);
+        }
+        const rawGroups = new Map<string, Row[]>();
+        for (const row of sourceRows) {
+          if (!matches(row, q.filters)) continue;
+          const key = JSON.stringify(groupingDimensions.map(id => row[id]));
+          const group = rawGroups.get(key) ?? []; group.push(row); rawGroups.set(key, group);
+        }
+        output = [...eventGroups.entries()].map(([key, group]) => {
+          const chronological = group.map(row => {
+            const timestamp = data.chronology.get(JSON.stringify([row.values.season, row.values.round, row.values.session]));
+            if (q.window) {
+              if (timestamp == null || !Number.isFinite(timestamp)) throw new SandboxError('ORDER_UNAVAILABLE', 'Missing session timestamp');
+            }
+            return { row, timestamp };
+          });
+          // Simple aggregations do not need chronology to reaggregate raw source
+          // values; use a stable representative session (race preferred).
+          chronological.sort((a, b) => q.window
+            ? a.timestamp! - b.timestamp!
+            : (a.row.values.session === 'results' ? 1 : 0) - (b.row.values.session === 'results' ? 1 : 0));
+          const latest = chronological.at(-1)!.row;
+          const values = { ...latest.values };
+          values[sessionField] = latest.values[sessionField];
+          if (!q.window) {
+            const rawGroup = rawGroups.get(key) ?? [];
+            for (const metric of q.metrics) {
+              if (metric.metricId === 'points') {
+                values.points = aggregatePoints(rawGroup.map(row => row.points_raw), metric.aggregation as 'sum' | 'mean' | 'min' | 'max');
+              } else if (metric.metricId === 'observations') {
+                values.observations = rawGroup.length;
+              }
+            }
+          }
+          if (q.dimensions.includes('round')) {
+            const season = String(values.season);
+            const round = Number(values.round);
+            const raceTimestamp = data.chronology.get(JSON.stringify([season, round, 'results']));
+            const hasRaceRows = data.rows.some(row => row.season === season && row.round === round && row.session === 'results');
+            const hasRaceInGroup = group.some(row => row.values.session === 'results');
+            const raceIsPastOrUnknown = raceTimestamp == null || raceTimestamp <= now();
+            if (raceIsPastOrUnknown && !hasRaceRows && q.metrics.some(metric => metric.metricId === 'points')) values.points = null;
+            else if (q.window && raceIsPastOrUnknown && !hasRaceInGroup && q.metrics.some(metric => metric.metricId === 'points')) values.points = null;
+          }
+          return { ...latest, id: key, values, key };
+        });
+      }
       if (q.displayFilters?.length) output = output.filter(row => matches(row.values, q.displayFilters!));
       if (output.length > q.limit) throw new SandboxError('LIMIT_EXCEEDED', 'Refine filters');
       output.sort((a, b) => { for (const o of q.orderBy) { const diff = o.fieldId === 'points' && a.values.points !== null && b.values.points !== null ? compareDecimal(String(a.values.points), String(b.values.points)) : cmp(a.values[o.fieldId], b.values[o.fieldId]); if (diff) return o.direction === 'asc' ? diff : -diff; } return a.key.localeCompare(b.key); });
       const columnIds = [...new Set([...q.dimensions.flatMap(id => [id, ...(descriptor.fields.find(f => f.id === id)?.labelField ? [descriptor.fields.find(f => f.id === id)!.labelField!] : [])]), ...q.metrics.map(m => m.metricId)])];
       const columns = columnIds.map(id => { const f = descriptor.fields.find(x => x.id === id); const m = descriptor.metrics.find(x => x.id === id); return { id, label: (f ?? m)!.label, type: f?.type ?? (id === 'points' ? 'decimal' as const : 'integer' as const) }; });
       return { protocolVersion: q.protocolVersion, requestId: q.requestId, selectionToken: q.selection.token, columns, rows: output.map(({ id, values }) => ({ id, values })), complete: true, totalRows: output.length, warnings: [
-        ...(q.window ? [{ code: 'OBSERVED_ONLY', message: text('Cumulative sum of observed results after population filters; missing results are not zero and this is not official standings.', 'Soma acumulada dos resultados observados após filtros de população; resultados ausentes não são zero e não é classificação oficial.') }] : []),
+          ...(q.window ? [{ code: 'OBSERVED_ONLY', message: text('Cumulative totals carry forward only for known past-session absences with validated endpoint integrity and results for other drivers. Unknown coverage/null points remain gaps; not official standings.', 'Acumulados são carregados apenas para ausências conhecidas em sessões passadas, com integridade validada do endpoint e resultados de outros pilotos. Cobertura desconhecida/pontos nulos permanecem lacunas; não é classificação oficial.') }] : []),
         ...(q.metrics.some(m => m.metricId === 'points' && m.aggregation === 'mean') ? [{ code: 'MEAN_ROUNDED', message: text('Means are rounded half away from zero to at least 12 decimal places, retaining source precision. Missing points propagate.', 'Médias são arredondadas para longe de zero em empates, com pelo menos 12 casas decimais e preservação da precisão da fonte. Pontos ausentes propagam.') }] : []),
       ] };
     },

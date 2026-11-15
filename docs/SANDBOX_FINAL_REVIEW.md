@@ -2,10 +2,9 @@
 
 ## Entregue
 
-- Modelos padrão e do usuário compartilham a lista persistida e cartões
-  recolhíveis. Padrões F1 recebem marca discreta pelos IDs exatos reservados no
-  host, não pelos nomes; edição e exclusão confirmada funcionam igualmente.
-  Edição abre o modelo completo; não há edição inline do nome no cartão.
+- Modelos padrão e do usuário compartilham a lista persistida em painel próprio,
+  sem estrelas. Selecionar abre; editar/excluir ficam à direita do cartão.
+  Exclusão exige confirmação; edição abre o modelo completo.
 - Modos de visualização e edição, com preservação de rascunhos. Nomes novos ou
   alterados estão limitados a 30 unidades UTF-16; nomes legados maiores podem ser
   mantidos exatamente. Criar uma cópia exige um nome de até 30 unidades.
@@ -24,10 +23,30 @@
 - Pizza permite ordenação, limiar estritamente menor para “Outros”, apresentado
   por último, e opções de legenda/rótulos. O agrupamento soma valores das fatias
   já calculadas, não recalcula média ou contagem distinta da união.
-- CSV completo com vírgulas, ordenação da tabela, proteção de fórmulas e manifesto
-  de fontes/licenças. Exportação experimental de SVG, PNG transparente e JPEG
-  com opções de legenda e rótulos, e salvamento por seletor nativo sem aceitar
-  caminho enviado pelo frontend. Nenhum arquivo existente é sobrescrito.
+- CSV da tabela com vírgulas, ordenação e proteção de fórmulas. Gráficos podem ser
+  exportados como SVG ou PNG com opção de incluir legenda. O salvamento usa seletor
+  local e o frontend não envia caminhos; nenhum arquivo existente é sobrescrito.
+
+## Mudança recente da sandbox
+
+- Ao salvar um modelo, a UI permite atualizar o selecionado ou criar um novo com
+  nome, além de escolher se filtros e seleção de dados serão restaurados ao abrir.
+  `saveFilters` e `saveDataSelection` são preferências booleanas opcionais no mesmo
+  documento v2/v3; ausência mantém a compatibilidade com modelos antigos.
+- Filtros e seleção continuam nos campos já existentes: com `saveFilters: false`,
+  a biblioteca omite os filtros salvos, exceto o filtro de seleção quando
+  `saveDataSelection: true`; com `saveDataSelection: false`,
+  `binding.partitionIds` é salvo como `[]`. Não foi criada migration.
+- O host valida e faz round-trip das duas preferências. Exportação do host aceita
+  um único CSV ou uma imagem SVG/PNG; não exporta manifesto JSON nem JPEG.
+- Esta mudança foi verificada por 65 testes da biblioteca, 26 do aplicativo e
+  44 testes Rust (um smoke test de rede ignorado), além do build web.
+  No Chromium, com dados sintéticos, foram exercitados o painel de modelos,
+  carregamento direto, modal bloqueante, isolamento pela legenda e exportações
+  SVG/PNG. **O WebView e o diálogo nativo real ainda precisam de validação.**
+- Análises antigas aparecem no painel unificado e podem ser abertas e salvas
+  como modelos. Sua exclusão permanece indisponível no store legado, com
+  explicação na interface; os documentos originais são preservados.
 
 ## Pendências e limites importantes
 
@@ -36,17 +55,10 @@
   dados filtrados, não soma valores previamente agrupados. Filtros antes aplicados
   somente à exibição de acumulados passam a limitar a entrada da nova consulta.
   O resultado não é classificação oficial e dados ausentes não viram zero.
-- A marca de padrão reflete o ID reservado pelo host, não é prova criptográfica
-  de origem e não protege o registro de edição/exclusão. Se um armazenamento
-  externo reutilizar intencionalmente um ID reservado, ele receberá a mesma marca.
-- Exportações de imagem e diálogo nativo foram testadas por SVG ECharts real,
-  Canvas simulado e escrita temporária; **não** houve validação no WebView, no
-  seletor real, da transparência efetiva ou da fidelidade visual. O layout da
-  imagem é fixo e pode diferir da tela. O comando nativo verifica assinatura e
-  limites, não é um sanitizador de SVG arbitrário.
-- O manifesto exportado inclui filtros e revisões; arquivos são locais, mas
-  devem ser compartilhados conscientemente. CSV e manifesto exigem dois diálogos;
-  cancelar/falhar no segundo pode deixar o primeiro salvo.
+- Exportação de imagem e diálogo nativo ainda precisam de validação no WebView e
+  no seletor real, inclusive transparência e fidelidade visual. O layout da imagem
+  é fixo e pode diferir da tela. O comando nativo verifica assinatura e limites,
+  não é um sanitizador de SVG arbitrário.
 - Versões anteriores do aplicativo podem falhar ao listar modelos com novas
   configurações de pizza/tabela ou agregações. Modelos existentes não são
   automaticamente convertidos nem regravados; não há downgrade automático.
@@ -57,7 +69,7 @@
 ## Verificação desta revisão
 
 Testes Node sequenciais com `NODE_OPTIONS=--max-old-space-size=1024`, sem
-`ulimit -v`, e timeout: `app/tests/analysis.test.mjs` (15), `export-service`
+`ulimit -v`, e timeout: `app/tests/analysis.test.mjs` (16), `export-service`
 (2), e em `packages/tests`: `f1-aggregation` (2), `f1-round-labels` (1),
 `usability` (2), `models-ui` (1), `v2` (5), `v3-ui` (1), `pie-options` (1),
 `pie-options-ui` (1), `image-export` (2), `table-export` (1) e `ui` (4).

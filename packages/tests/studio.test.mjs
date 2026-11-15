@@ -16,6 +16,12 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(document.getElementById('root'));
   const provider = syntheticF1();
+  const describe = provider.describeDataset;
+  provider.describeDataset = async (...args) => {
+    const descriptor = await describe(...args);
+    descriptor.presentation.defaultFilters = [...descriptor.presentation.defaultFilters.filter(f => f.fieldId !== 'session'), { fieldId: 'session', op: 'in', values: ['results'] }];
+    return descriptor;
+  };
   let lastResult;
   const query = provider.query;
   provider.query = async (...args) => { const result = await query(...args); lastResult = result; return result; };
@@ -44,7 +50,8 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     assert.equal(model.series.length, 3);
     assert.ok(model.series.some(s => s.label === 'Ana Lima · 2025'));
     assert.ok(lastResult.rows.some(row => row.values.driver_name === 'Ana Lima'));
-    assert.equal(document.querySelectorAll('.rds-sb-dataset-list button').length, 3);
+    assert.equal(document.querySelectorAll('.rds-sb-dataset-list').length, 0);
+    assert.ok(button('Saved models'));
     assert.ok(!document.body.textContent.includes('Moving average'));
 
     await openFilter('Drivers'); await checkName('Ana Lima');
@@ -62,21 +69,16 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     await act(async () => allTeams.click()); await settle();
     assert.equal(model.series.length, 2);
 
-    await click('Sprint results');
+    await openFilter('Sessions'); await checkName('Race'); await checkName('Sprint');
     assert.equal(lastResult.rows.length, 6);
-    assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'true');
     await openFilter('Rounds'); await checkName('4');
     assert.equal(lastResult.rows.length, 2);
     await act(async () => document.querySelector('.rds-sb-quick-filter[open] .rds-sb-all').click()); await settle();
     assert.equal(lastResult.rows.length, 6);
     await openFilter('Sessions'); await checkName('Race');
-    assert.equal(lastResult.rows.length, 28); // Race + Sprint aggregate once per round/driver.
+    assert.equal(lastResult.rows.length, 28);
     assert.equal(model.series.find(series => series.label.includes('Ana Lima')).values[3], 26);
-    assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'false');
-    await checkName('Race');
-    assert.equal(lastResult.rows.length, 6);
-    assert.equal(button('Sprint results').getAttribute('aria-pressed'), 'true');
-    await click('Race results');
+    await checkName('Sprint');
     await openFilter('Season'); await checkName('2024');
     assert.equal(selectedSeasons().length, 2);
     assert.equal(labels('Comparison selection').length, 0);
@@ -93,15 +95,15 @@ test('real F1 adapter + studio: named selections, seasons, presets, comparison, 
     await click('Bar'); assert.equal(model.kind, 'bar');
     await click('Line'); assert.equal(model.kind, 'line');
     assert.equal(document.querySelector('.rds-sb-preview'), null);
-    await click('Save model');
+    await click('Save model'); await click('Confirm');
     assert.equal((await store.models.list()).length, 1);
+    await click('Saved models');
     await act(async () => document.querySelector('.rds-sb-model-card button[aria-label^="Edit model:"]').click()); await settle();
     assert.equal(model.series.length, 4);
     await openFilter('Season');
     assert.equal(selectedSeasons().length, 2);
     await click('Clear filters');
     assert.equal(selectedSeasons().length, 2);
-    assert.equal(button('Race results').getAttribute('aria-pressed'), 'true');
     assert.equal(model.series.length, 6);
   } finally {
     await act(async () => root.unmount()); dom.window.close();

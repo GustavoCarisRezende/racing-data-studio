@@ -28,7 +28,6 @@ fn decode_export_image(kind: &str, content: &str) -> Result<Vec<u8>, String> {
     let bytes = STANDARD.decode(content.as_bytes()).map_err(|_| "INVALID_EXPORT".to_string())?;
     if bytes.len() > 8 * 1024 * 1024 || match kind {
         "png" => !bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-        "jpeg" => !bytes.starts_with(b"\xff\xd8\xff") || !bytes.ends_with(b"\xff\xd9"),
         "svg" => !std::str::from_utf8(&bytes).is_ok_and(|text| text.starts_with("<svg ") && text.ends_with("</svg>")),
         _ => true,
     } { return Err("INVALID_EXPORT".into()); }
@@ -40,10 +39,8 @@ fn decode_export_image(kind: &str, content: &str) -> Result<Vec<u8>, String> {
 pub async fn f1_export_text(app: tauri::AppHandle, kind: String, content: String) -> Result<bool, String> {
     let (extension, name, filter, binary) = match kind.as_str() {
         "csv" => ("csv", "racing-data.csv", "CSV", false),
-        "manifest" => ("json", "racing-data.manifest.json", "JSON", false),
         "svg" => ("svg", "racing-data.svg", "SVG", true),
         "png" => ("png", "racing-data.png", "PNG", true),
-        "jpeg" => ("jpeg", "racing-data.jpeg", "JPEG", true),
         _ => return Err("INVALID_EXPORT".into()),
     };
     if content.len() > EXPORT_TEXT_LIMIT { return Err("INVALID_EXPORT".into()); }
@@ -97,7 +94,7 @@ mod export_text_tests {
         assert!(decode_export_image("png", &png).is_ok());
         assert!(decode_export_image("jpeg", &png).is_err());
         assert!(decode_export_image("png", "not base64!").is_err());
-        assert!(decode_export_image("jpeg", &STANDARD.encode(b"\xff\xd8\xffsynthetic\xff\xd9")).is_ok());
+        assert!(decode_export_image("jpeg", &STANDARD.encode(b"\xff\xd8\xffsynthetic\xff\xd9")).is_err());
         assert!(decode_export_image("svg", &STANDARD.encode(b"<svg xmlns=\"x\"></svg>")).is_ok());
         assert!(decode_export_image("csv", &png).is_err());
     }

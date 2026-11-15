@@ -74,7 +74,11 @@ export function summarizeTableBy(d: DatasetDescriptor, input: VisualizationSpec,
   const metric = d.metrics.find(m => m.id === input.metric.metricId);
   const field = d.fields.find(f => f.id === fieldId);
   if (input.kind !== 'table' || !metric || !field || field.role !== 'dimension' || field.availability === 'unavailable' || !metric.groupableBy.includes(fieldId)) return null;
-  const candidate = withRequiredDimensions(d, { ...input, x: fieldId, series: null, comparison: null, runningSum: false, calculation: undefined, cumulativeScope: undefined, extraDimensions: undefined, secondaryMetric: undefined, table: undefined });
+  // Profiles define a fixed grain, chronology and partition. Replacing that
+  // grain is not a meaningful reaggregation of the cumulative measure.
+  if (input.calculation) return null;
+  if (input.runningSum && !field.ordered) return null;
+  const candidate = withRequiredDimensions(d, { ...input, x: fieldId, series: null, comparison: null, extraDimensions: undefined, secondaryMetric: undefined, table: undefined });
   if (!candidate) return null;
   try { assertVisualization(candidate, d); return candidate; } catch { return null; }
 }
@@ -178,7 +182,7 @@ export interface ChartModel {
   xLabel: string;
   yLabel: string;
   categories: { key: string; label: string }[];
-  series: { id: string; label: string; values: (number | null)[]; points?: { id: string; label: string; value: [number, number] }[] }[];
+  series: { id: string; label: string; values: (number | null)[]; dimensions?: Record<string, Scalar>; valueLabels?: string[]; points?: { id: string; label: string; value: [number, number] }[] }[];
   slices?: { id: string; label: string; value: number; exactValue?: string }[];
   piePresentation?: { showLegend: boolean; showLabels: boolean };
   omitted?: number;
@@ -198,14 +202,15 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
   const metric = d.metrics.find(m => m.id === q.metrics[0]?.metricId);
   if (!x || !metric) throw new SandboxError('INVALID_QUERY', 'Missing chart fields');
   if (!d.capabilities.charts.includes(kind) || (kind === 'line' && !x.ordered)) throw new SandboxError('INVALID_QUERY', 'Unsupported chart axis');
-  const groups = q.dimensions.filter(key => key !== xId);
+  const groups = q.dimensions.filter(key => key !== xId && (!q.unifyEvents || key !== d.capabilities.eventUnification?.fieldId));
   const categories: ChartModel['categories'] = [];
   const format = createValueFormatter(locale);
   const aggregateLabels = locale.startsWith('pt') ? { sum: 'soma', mean: 'média', min: 'mínimo', max: 'máximo', count: 'contagem', countDistinct: 'contagem distinta' } : { sum: 'sum', mean: 'mean', min: 'minimum', max: 'maximum', count: 'count', countDistinct: 'distinct count' };
   const calculationProfile = q.window?.scope === 'profile' ? d.capabilities.runningSumProfiles?.find(p => p.id === q.window!.profileId) : undefined;
   const categoryIndices = new Map<string, number>();
-  const series = new Map<string, { id: string; label: string; cells: Map<string, number | null> }>();
+  const series = new Map<string, { id: string; label: string; dimensions: Record<string, Scalar>; cells: Map<string, number | null>; labels: Map<string, string> }>();
   const displayDimension = (key: string, row: Record<string, Scalar>): string => {
+    if (q.unifyEvents && key === d.capabilities.eventUnification?.fieldId) return locale.startsWith('pt') ? 'Eventos unificados' : 'Unified events';
     const field = d.fields.find(f => f.id === key)!;
     const label = field.labelField ? row[field.labelField] : undefined;
     const fixed = field.valueLabels?.find(item => item.value === row[key]);
@@ -215,7 +220,7 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
     if (q.window || (kind === 'scatter' && q.metrics.length !== 2)) throw new SandboxError('INVALID_QUERY', 'Incompatible chart query');
     const measureLabel = (index: number) => { const selection = q.metrics[index]!; const m = d.metrics.find(m => m.id === selection.metricId)!; return `${localize(m.label, locale)}${m.unit ? ` (${m.unit})` : ''} · ${aggregateLabels[selection.aggregation]}`; };
     const model: ChartModel = { kind, title, description: title, xLabel: kind === 'scatter' ? measureLabel(1) : localize(x.label, locale), yLabel: measureLabel(0), categories: [], series: [], omitted: 0 };
-    const slices: (NonNullable<ChartModel['slices']>[number] & { exactValue: string })[] = [];
+    const slices: (NonNullable<ChartModel['slices']>[number] & { exactValue: string; dimensions?: Record<string, Scalar> })[] = [];
     const others: string[] = [];
     const scatter = new Map<string, ChartModel['series'][number]>();
     for (const row of r.rows) {
@@ -226,13 +231,13 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
         if (y === null) { model.omitted!++; continue; }
         const exactValue = String(row.values[metric.id]);
         if (pie?.otherBelow !== undefined && compareDecimal(exactValue, pie.otherBelow) < 0) others.push(exactValue);
-        else slices.push({ id: row.id, label, value: y, exactValue });
+        else slices.push({ id: row.id, label, value: y, exactValue, dimensions: Object.fromEntries(q.dimensions.map(key => [key, row.values[key]!])) });
       } else {
         const numericX = chartNumber(row.values[q.metrics[1]!.metricId]!);
         if (numericX === null || y === null) { model.omitted!++; continue; }
         const id = JSON.stringify(groups.map(key => row.values[key]));
         let group = scatter.get(id);
-        if (!group) { group = { id, label: groups.length ? groups.map(key => displayDimension(key, row.values)).join(' · ') : localize(metric.label, locale), values: [], points: [] }; scatter.set(id, group); }
+        if (!group) { group = { id, label: groups.length ? groups.map(key => displayDimension(key, row.values)).join(' · ') : localize(metric.label, locale), dimensions: Object.fromEntries(groups.map(key => [key, row.values[key]!])), values: [], points: [] }; scatter.set(id, group); }
         group.points!.push({ id: row.id, label, value: [numericX, y] });
       }
     }
@@ -249,7 +254,7 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
       }
       if (!slices.some(s => s.value > 0)) throw new SandboxError('EMPTY_PIE', 'Pie requires a positive total');
       if (slices.length > d.capabilities.maxSeries || slices.length > 100) throw new SandboxError('LIMIT_EXCEEDED', 'Too many slices; refine filters');
-      model.slices = slices; model.series = slices.map(s => ({ id: s.id, label: s.label, values: [s.value] }));
+      model.slices = slices; model.series = slices.map(s => ({ id: s.id, label: s.label, dimensions: s.dimensions, values: [s.value] }));
       if (pie) model.piePresentation = { showLegend: pie.showLegend, showLabels: pie.showLabels };
     } else model.series = [...scatter.values()];
     for (const s of model.series) if (model.series.some(other => other.id !== s.id && other.label === s.label)) {
@@ -274,24 +279,25 @@ export function buildChartModel(d: DatasetDescriptor, q: QueryRequest, r: QueryR
     const categoryKey = JSON.stringify(row.values[x.id]);
     if (!categoryIndices.has(categoryKey)) {
       categoryIndices.set(categoryKey, categories.length);
-      categories.push({ key: categoryKey, label: axisLabels.get(categoryKey)!.size === 1 ? displayDimension(x.id, row.values) : format(row.values[x.id]!, x.type) });
+      categories.push({ key: categoryKey, label: x.ordered && (x.type === 'integer' || x.type === 'decimal') ? format(row.values[x.id]!, x.type) : axisLabels.get(categoryKey)!.size === 1 ? displayDimension(x.id, row.values) : format(row.values[x.id]!, x.type) });
     }
     const seriesKey = JSON.stringify(groups.map(key => row.values[key]));
     let group = series.get(seriesKey);
     if (!group) {
-      group = { id: seriesKey, label: groups.length ? groups.map(key => displayDimension(key, row.values)).join(' · ') : localize(metric.label, locale), cells: new Map() };
+      group = { id: seriesKey, label: groups.length ? groups.map(key => displayDimension(key, row.values)).join(' · ') : localize(metric.label, locale), dimensions: Object.fromEntries(groups.map(key => [key, row.values[key]!])), cells: new Map(), labels: new Map() };
       series.set(seriesKey, group);
     }
     if (group.cells.has(categoryKey)) throw new SandboxError('INVALID_CONTRACT', 'Duplicate grouped chart cell');
     const raw = row.values[metric.id];
     const numeric = chartNumber(raw!);
     group.cells.set(categoryKey, numeric);
+    group.labels.set(categoryKey, displayDimension(x.id, row.values));
   }
   if (series.size > d.capabilities.maxSeries || categories.length * series.size > 20_000) throw new SandboxError('LIMIT_EXCEEDED', 'Too many chart cells; refine filters');
   const xLabel = localize(x.label, locale);
   const yLabel = localize(metric.label, locale) + (metric.unit ? ` (${metric.unit})` : '') + ` · ${aggregateLabels[q.metrics[0]!.aggregation]}` + (q.window ? calculationProfile ? ` · ${localize(calculationProfile.measureLabel ?? calculationProfile.label, locale)}` : q.window.scope === 'beforeDisplayFilter' ? locale.startsWith('pt') ? ' · acumulado antes do recorte' : ' · running sum before display crop' : locale.startsWith('pt') ? ' · acumulado filtrado' : ' · filtered running sum' : '');
   return { kind, title, description: `${title}. ${xLabel}; ${yLabel}. ${r.rows.length} ${locale.startsWith('pt') ? 'linhas; valores exatos na tabela' : 'rows; exact values in the table'}.`, xLabel, yLabel, categories,
-    series: [...series.values()].map(s => ({ id: s.id, label: [...series.values()].some(other => other.id !== s.id && other.label === s.label) ? `${s.label} (${s.id})` : s.label, values: categories.map(c => s.cells.get(c.key) ?? null) })) };
+    series: [...series.values()].map(s => ({ id: s.id, label: [...series.values()].some(other => other.id !== s.id && other.label === s.label) ? `${s.label} (${s.id})` : s.label, dimensions: s.dimensions, values: categories.map(c => s.cells.get(c.key) ?? null), valueLabels: categories.map(c => s.labels.get(c.key) ?? c.label) })) };
 }
 
 export function exportResult(d: DatasetDescriptor, q: QueryRequest, r: QueryResult, title: string): ExportArtifact[] {

@@ -17,6 +17,7 @@ test('round labels retain season identity and do not invent missing or ambiguous
   assert.ok(result.rows.filter(r => r.values.round === 2).every(r => r.values.round_name === null));
   const chart = buildChartModel(d, q, result, 'line', 'en-US', 'Synthetic');
   assert.deepEqual(chart.categories.map(c => c.label), ['1', '2']);
+  assert.deepEqual(chart.series.map(s => s.valueLabels[0]).sort(), ['1 · North GP', '1 · South GP']);
   const facet = await provider.facet({ protocolVersion: 1, datasetId: d.id, selection, fieldId: 'round', filters: [], search: '', limit: 100 });
   assert.equal(facet.values.find(item => item.value === 1).label, '1');
   const single = await provider.facet({ protocolVersion: 1, datasetId: d.id, selection, fieldId: 'round', filters: [{ fieldId: 'season', op: 'in', values: ['2024'] }], search: '', limit: 100 });

@@ -23,7 +23,7 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
   const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await delay(150); }); };
   const button = text => { const b = [...document.querySelectorAll('button')].find(b => b.textContent === text); assert.ok(b, `button ${text}`); return b; };
   const click = async text => { await act(async () => button(text).click()); await settle(); };
-  const cardAction = async (title, action) => { const card = [...document.querySelectorAll('.rds-sb-model-card')].find(c => c.querySelector('summary').textContent === title); assert.ok(card, `card ${title}`); const target = [...card.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith(`${action}:`)); assert.ok(target, action); await act(async () => target.click()); await settle(); };
+  const cardAction = async (title, action) => { await click('Saved models'); const card = [...document.querySelectorAll('.rds-sb-model-card')].find(c => c.querySelector('.rds-sb-model-open').textContent === title); assert.ok(card, `card ${title}`); const target = [...card.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith(`${action}:`)); assert.ok(target, action); await act(async () => target.click()); await settle(); };
   try {
     await act(async () => root.render(createElement(Sandbox, { provider, store, host, ChartRenderer: Renderer }))); await settle();
     assert.equal(document.querySelectorAll('.rds-sb-result select').length, 0);
@@ -43,7 +43,7 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     assert.ok(queries.at(-1).dimensions.includes('campaign'));
     assert.equal(new Set(chart.series.map(s => s.label)).size, 3);
     assert.ok(document.body.textContent.includes('Changes not yet saved'));
-    await click('Save model');
+    await click('Save model'); await click('Confirm');
     let saved = await store.models.load((await store.models.list())[0].id);
     assert.equal(saved.revision, '1'); assert.ok(!document.body.textContent.includes('Changes not yet saved'));
     assert.ok(!document.querySelector('.rds-sb-preview'));
@@ -64,7 +64,7 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     const week = [...columns.querySelectorAll('label')].find(l => l.textContent === 'Week');
     await act(async () => week.querySelector('input').click()); await settle();
     assert.ok(document.querySelector('th').textContent.startsWith('Harvest (kg)'));
-    await click('Save model'); saved = await store.models.load(saved.id);
+    await click('Save model'); await click('Confirm'); saved = await store.models.load(saved.id);
     assert.deepEqual(saved.visualization.table.columns, ['harvest', 'campaign']);
     assert.deepEqual(saved.visualization.table.sort, { columnId: 'harvest', direction: 'asc' });
     const campaignHeader = () => [...document.querySelectorAll('thead th button')].find(b => b.textContent.startsWith('Campaign'));
@@ -75,11 +75,9 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     await act(async () => campaignHeader().click()); await settle();
     assert.ok(!campaignHeader().textContent.includes('Sort priority'));
     await act(async () => campaignHeader().click()); await settle();
-    const group = [...document.querySelectorAll('label')].find(l => l.firstChild?.textContent === 'Organize table rows by').querySelector('select');
-    await act(async () => { group.value = 'campaign'; group.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
-    assert.ok(document.querySelector('.rds-sb-group-row'));
-    await click('Save model'); saved = await store.models.load(saved.id);
-    assert.deepEqual(saved.visualization.table, { version: 2, columns: ['harvest', 'campaign'], sorts: [{ columnId: 'harvest', direction: 'asc' }, { columnId: 'campaign', direction: 'asc' }], groupBy: 'campaign' });
+    assert.ok(![...document.querySelectorAll('label')].some(l => l.firstChild?.textContent === 'Organize table rows by'));
+    await click('Save model'); await click('Confirm'); saved = await store.models.load(saved.id);
+    assert.deepEqual(saved.visualization.table, { version: 2, columns: ['harvest', 'campaign'], sorts: [{ columnId: 'harvest', direction: 'asc' }, { columnId: 'campaign', direction: 'asc' }] });
     await click('Scatter');
     assert.equal(chart.kind, 'scatter'); assert.equal(queries.at(-1).metrics.length, 2);
     assert.ok(document.body.textContent.includes('Missing chart values omitted'));
@@ -87,7 +85,7 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     await click('Cancel'); assert.equal(chart.kind, 'scatter');
     await cardAction(saved.title, 'Edit model'); await click('Confirm');
     assert.ok(document.querySelector('th').textContent.startsWith('Harvest (kg)'));
-    assert.ok(document.querySelector('.rds-sb-group-row'), 'grouping survives reopening');
+    assert.ok(!document.querySelector('.rds-sb-group-row'), 'no display-only grouping was added');
     const oldTable = document.querySelector('tbody').textContent;
     const oldToken = queries.at(-1).selection.token;
     const rows = fixture.getRows(); rows[0].harvest_kg = '333.00'; fixture.updateRows(rows);
@@ -98,18 +96,18 @@ test('v2 studio: searchable multiselection, keyboard columns, persisted sorting,
     const beforeUnload = new dom.window.Event('beforeunload', { cancelable: true }); window.dispatchEvent(beforeUnload); assert.ok(beforeUnload.defaultPrevented);
     saved = await store.models.load(saved.id);
     await store.models.save({ ...saved, title: 'External edit' }, saved.revision);
-    await click('Save model'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
+    await click('Save model'); await click('Confirm'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
     assert.ok(document.body.textContent.includes('Changes not yet saved'));
     await cardAction(saved.title, 'Delete model'); assert.ok(document.querySelector('[role=alertdialog]').textContent.includes('Delete model'));
     await click('Cancel'); assert.equal((await store.models.list()).length, 1);
     await cardAction(saved.title, 'Delete model'); await click('Confirm'); assert.ok(document.querySelector('[role=alert]').textContent.includes('CONFLICT'));
-    await click('Save as new model'); assert.equal((await store.models.list()).length, 2);
+    await click('Save model'); await act(async () => [...document.querySelectorAll('[role=dialog] input[type=radio]')].at(-1).click()); await click('Confirm'); assert.equal((await store.models.list()).length, 2);
     // Select the newly created model (fresh revision) and delete only that record.
     const created = (await store.models.list()).find(m => m.id !== saved.id);
     await cardAction(created.title, 'Delete model'); await click('Confirm'); assert.equal((await store.models.list()).length, 1);
     assert.ok(dirtyEvents.includes(true) && dirtyEvents.includes(false));
     store.models.list = async () => { throw new Error('Injected list failure'); };
-    await click('Refresh model list');
+    await click('Saved models'); await click('Refresh model list');
     await click('Table');
     assert.ok(document.querySelector('.rds-sb-models [role=alert]'), 'list errors survive unrelated query updates');
   } finally {

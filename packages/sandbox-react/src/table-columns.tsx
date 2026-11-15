@@ -45,9 +45,6 @@ export function TableColumns({ descriptor: d, value: v, onChange, locale, t, dis
     }}>
       <option value="asc">{t('asc')}</option><option value="desc">{t('desc')}</option>
     </select></label>}
-    <label>{t('tableGroup')}<select disabled={disabled} value={v.table?.version === 2 ? v.table.groupBy ?? '' : ''} onChange={e => onChange({ version: 2, columns: selected, sorts, ...(e.target.value ? { groupBy: e.target.value } : {}) })}>
-      <option value="">{t('none')}</option>{visualizationDimensions(v).filter(id => selected.includes(id)).map(id => <option key={id} value={id}>{label(id)}</option>)}
-    </select></label>
     {v.table?.version === 2 && v.table.groupBy && <p className="rds-sb-muted">{t('tableGroupHelp')}</p>}
   </details>;
 }

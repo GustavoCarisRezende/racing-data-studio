@@ -39,19 +39,23 @@ struct Visualization {
     #[serde(skip_serializing_if = "Option::is_none")] extra_dimensions: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")] calculation: Option<Calculation>,
     #[serde(skip_serializing_if = "Option::is_none")] pie: Option<Pie>,
+    #[serde(skip_serializing_if = "Option::is_none")] unify_events: Option<bool>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Model {
     document_version: u8, kind: String, id: String, revision: Option<String>, title: String,
     dataset_id: String, dataset_schema_version: String, dataset_semantic_version: String,
-    binding: Binding, visualization: Visualization, filters: Vec<Value>, created_at: String, updated_at: String,
+    binding: Binding, visualization: Visualization, filters: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")] save_filters: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")] save_data_selection: Option<bool>,
+    created_at: String, updated_at: String,
 }
 fn metric(m: &Metric) -> bool { matches!((m.metric_id.as_str(), m.aggregation.as_str()), ("points", "sum" | "mean" | "min" | "max") | ("observations", "count")) }
 fn parse(raw: Value) -> Result<Model> {
     let serialized = serde_json::to_string(&raw).map_err(|_| invalid())?;
     if serialized.len() > 512_000 || serialized.encode_utf16().count() > 256_000 || raw.get("revision").is_none() || raw.pointer("/visualization/series").is_none() || raw.pointer("/visualization/comparison").is_none() { return Err(invalid()); }
-    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation", "pie"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
+    for key in ["secondaryMetric", "cumulativeScope", "table", "extraDimensions", "calculation", "pie", "unifyEvents"] { if raw.pointer(&format!("/visualization/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
     if raw.pointer("/visualization/pie/otherBelow").map_or(false, Value::is_null) { return Err(invalid()); }
     for key in ["sort", "sorts", "groupBy"] { if raw.pointer(&format!("/visualization/table/{key}")).map_or(false, Value::is_null) { return Err(invalid()); } }
     let doc: Model = serde_json::from_value(raw).map_err(|_| invalid())?;
@@ -188,6 +192,8 @@ mod table_v2_tests {
         db.execute_batch("CREATE TABLE f1_saved_models (id TEXT PRIMARY KEY, revision TEXT NOT NULL, document TEXT NOT NULL)").unwrap();
         let old = json!({"documentVersion":2,"kind":"model","id":"old","revision":null,"title":"Old","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"table","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false,"table":{"version":1,"columns":["round","season","points"],"sort":{"columnId":"points","direction":"desc"}}},"filters":[],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
         let saved_old = save(&mut db, old.clone(), None, true).unwrap();
+        assert!(saved_old.get("saveFilters").is_none());
+        assert!(saved_old.get("saveDataSelection").is_none());
         for aggregation in ["sum", "mean", "min", "max"] {
             let mut candidate = old.clone();
             candidate["visualization"]["metric"]["aggregation"] = json!(aggregation);
@@ -209,9 +215,34 @@ mod table_v2_tests {
         let saved_new = save(&mut db, modern.clone(), None, true).unwrap();
         assert_eq!(load(&db, "old", true).unwrap(), saved_old);
         assert_eq!(load(&db, "new", true).unwrap(), saved_new);
+        let mut preferences = modern.clone();
+        preferences["documentVersion"] = json!(2);
+        preferences["id"] = json!("preferences");
+        preferences["saveFilters"] = json!(false);
+        preferences["saveDataSelection"] = json!(true);
+        let saved_preferences = save(&mut db, preferences, None, true).unwrap();
+        assert_eq!(saved_preferences["documentVersion"], 2);
+        assert_eq!(saved_preferences["saveFilters"], false);
+        assert_eq!(saved_preferences["saveDataSelection"], true);
+        assert_eq!(load(&db, "preferences", true).unwrap(), saved_preferences);
+        let mut unified = json!({"documentVersion":3,"kind":"model","id":"unified","revision":null,"title":"Unified cumulative","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"bar","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","extraDimensions":["session"],"runningSum":true,"calculation":{"version":3,"profileId":"driver-all-sessions-v1"},"unifyEvents":true},"filters":[{"fieldId":"session","op":"in","values":["results","sprint"]}],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved_unified = save(&mut db, unified.clone(), None, true).unwrap();
+        assert_eq!(saved_unified["visualization"]["unifyEvents"], true);
+        assert_eq!(load(&db, "unified", true).unwrap(), saved_unified);
+        let simple_unified = json!({"documentVersion":2,"kind":"model","id":"simple-unified","revision":null,"title":"Unified points","datasetId":"f1.session_results","datasetSchemaVersion":"1","datasetSemanticVersion":"1","binding":{"policy":"latest","partitionIds":[]},"visualization":{"kind":"line","x":"round","metric":{"metricId":"points","aggregation":"sum"},"series":"driver","comparison":"season","runningSum":false,"unifyEvents":true},"filters":[{"fieldId":"session","op":"in","values":["results","sprint"]}],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"});
+        let saved_simple = save(&mut db, simple_unified, None, true).unwrap();
+        assert_eq!(saved_simple["visualization"]["unifyEvents"], true);
+        assert_eq!(load(&db, "simple-unified", true).unwrap(), saved_simple);
+        unified["id"] = json!("invalid-unified");
+        unified["visualization"]["extraDimensions"] = json!([]);
+        assert!(parse(unified).is_err());
+        assert!(saved_old["visualization"].get("unifyEvents").is_none());
         let mut bad_pie = modern.clone();
         bad_pie["visualization"]["pie"]["otherBelow"] = json!("-1");
         assert!(parse(bad_pie).is_err());
+        let mut bad_preferences = saved_preferences.clone();
+        bad_preferences["saveFilters"] = json!("false");
+        assert!(parse(bad_preferences).is_err());
         modern["id"] = json!("invalid");
         modern["visualization"]["table"]["sorts"] = json!([{"columnId":"points","direction":"asc"},{"columnId":"points","direction":"desc"}]);
         assert!(save(&mut db, modern, None, true).is_err());

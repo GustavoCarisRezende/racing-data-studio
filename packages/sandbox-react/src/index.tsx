@@ -1,8 +1,8 @@
 import { Component, Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { assertAnalysisList, assertCatalog, assertDataset, assertResult, assertSelection, assertVisualization, parseAnalysisDocument, parseSavedModelDocument } from '@rds/sandbox-contracts';
-import type { AnalysisDocument, AnalysisStore, AnalysisSummary, DatasetDescriptor, DatasetSummary, Filter, ImageExportArtifact, ModelDocument, QueryRequest, QueryResult, ResolvedSelection, SandboxDataProvider, SandboxHostServices, SelectionRequest, TableConfiguration, VisualizationSpec } from '@rds/sandbox-contracts';
-import { availableDimensions, buildChartModel, buildQuery, chartAvailable, compatibleScatterMetrics, createValueFormatter, defaultVisualization, editableKey, exportTableResult, fieldValueLabel, forPie, localize, logicalColumns, makeAnalysis, makeModel, makeModelV3, tableRows, visualizationDimensions, withCalculationProfile, withRequiredDimensions } from '@rds/sandbox-core';
+import { assertAnalysisList, assertCatalog, assertDataset, assertResult, assertSelection, assertVisualization, eventUnificationAvailable, parseAnalysisDocument, parseSavedModelDocument } from '@rds/sandbox-contracts';
+import type { AnalysisDocument, AnalysisStore, AnalysisSummary, DatasetDescriptor, DatasetSummary, Filter, ImageExportArtifact, ModelDocument, QueryRequest, QueryResult, ResolvedSelection, SandboxDataProvider, SandboxHostServices, Scalar, SelectionRequest, TableConfiguration, VisualizationSpec } from '@rds/sandbox-contracts';
+import { availableDimensions, buildChartModel, buildQuery, chartAvailable, compatibleScatterMetrics, createValueFormatter, defaultVisualization, editableKey, exportTableResult, fieldValueLabel, forPie, localize, logicalColumns, makeModel, makeModelV3, tableRows, visualizationDimensions, withCalculationProfile, withRequiredDimensions } from '@rds/sandbox-core';
 import type { ChartModel } from '@rds/sandbox-core';
 import { FilterEditor } from './filters.js';
 import { QuickFilters, useFacetOptions } from './quick-filters.js';
@@ -17,7 +17,7 @@ import type { MessageKey, Translate } from './messages.js';
 export { translator } from './messages.js';
 export type { MessageKey, Translate } from './messages.js';
 
-export interface ChartRendererProps { model: ChartModel; locale: string }
+export interface ChartRendererProps { model: ChartModel; locale: string; onVisibleModelChange?: (model: ChartModel) => void; legendSelection?: { fieldId: string; options: { value: Exclude<Scalar, null>; label: string }[]; selected: Exclude<Scalar, null>[]; disabled: boolean; onToggle: (value: Exclude<Scalar, null>) => void } }
 export interface SandboxProps {
   provider: SandboxDataProvider;
   store?: AnalysisStore;
@@ -62,6 +62,23 @@ class ChartBoundary extends Component<{ children: ReactNode; fallback: string },
   static getDerivedStateFromError() { return { failed: true }; }
   render() { return this.state.failed ? <p role="alert">{this.props.fallback}</p> : this.props.children; }
 }
+function Modal({ label, onClose, children, alert = false }: { label: string; onClose: () => void; children: ReactNode; alert?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    ref.current?.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)')?.focus();
+    return () => { previous?.focus(); };
+  }, []);
+  return <div className="rds-sb-modal-backdrop"><div ref={ref} className="rds-sb-confirm" role={alert ? 'alertdialog' : 'dialog'} aria-modal="true" aria-label={label} onKeyDown={event => {
+    if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
+    if (event.key === 'Tab') {
+      const elements = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')];
+      const index = elements.indexOf(document.activeElement as HTMLElement);
+      if (event.shiftKey && index <= 0) { event.preventDefault(); elements.at(-1)?.focus(); }
+      else if (!event.shiftKey && index === elements.length - 1) { event.preventDefault(); elements[0]?.focus(); }
+    }
+  }}>{children}</div></div>;
+}
 
 /** All I/O is injected. No global state, localStorage, source fetches, or native APIs. */
 export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-US', messages, ChartRenderer, chartExporter, selection = DEFAULT_SELECTION }: SandboxProps) {
@@ -90,6 +107,14 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   const signature = session ? editableKey(session.descriptor.id, title, session.visualization, session.filters) : '';
   const dirty = Boolean(signature && baseline && signature !== baseline);
   const [confirmation, setConfirmation] = useState<{ kind: 'discardChanges' | 'deleteModel'; title: string; resolve: (ok: boolean) => void } | null>(null);
+  const [saveDialog, setSaveDialog] = useState(false);
+  const [modelsDialog, setModelsDialog] = useState(false);
+  const [exportDialog, setExportDialog] = useState(false);
+  const visibleChart = useRef<{ source: ChartModel; visible: ChartModel } | null>(null);
+  const [saveAsNew, setSaveAsNew] = useState(true);
+  const [saveName, setSaveName] = useState('');
+  const [saveFilters, setSaveFilters] = useState(true);
+  const [saveDataSelection, setSaveDataSelection] = useState(true);
   const confirmationRef = useRef(confirmation); confirmationRef.current = confirmation;
   const [storeRevision, setStoreRevision] = useState(0);
   const [working, setWorking] = useState(false);
@@ -116,10 +141,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   async function confirmAction(kind: 'discardChanges' | 'deleteModel', title: string) {
     const controller = new AbortController(); operation.current?.abort(); operation.current = controller;
     try {
-      if (host?.confirm) { const ok = await host.confirm({ kind, title }, controller.signal); return !controller.signal.aborted && ok; }
-      const focused = document.activeElement;
       const ok = await new Promise<boolean>(resolve => setConfirmation({ kind, title, resolve }));
-      if (focused instanceof HTMLElement) focused.focus();
       return !controller.signal.aborted && ok;
     } catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); return false; }
     finally { if (operation.current === controller) operation.current = null; }
@@ -138,6 +160,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
 
   useEffect(() => {
     if (!load) return;
+    const prior = sessionRef.current;
     const controller = new AbortController();
     setLoading(true); setSession(null); setResult(null); setError(''); setNotice('');
     void (async () => {
@@ -148,19 +171,26 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
       if (model && (!descriptor.capabilities.latestSelection || !modelStore || (model.documentVersion === 3 && !canStoreV3))) throw new Error('Latest/model version unavailable');
       const document = load.document === undefined || load.model ? undefined : parseAnalysisDocument(load.document, descriptor);
       const resolved = await provider.resolveSelection({ protocolVersion: 1, datasetId: descriptor.id,
-        ...(model ? model.binding : document ? { policy: 'pinned', partitionIds: document.selection.revisions.map(r => r.partitionId), revisions: document.selection.revisions } as const : selection) }, controller.signal);
+        ...(model ? model.saveDataSelection === false && prior?.descriptor.id === descriptor.id ? { policy: 'latest' as const, partitionIds: prior.partitionIds } : model.binding : document ? { policy: 'pinned', partitionIds: document.selection.revisions.map(r => r.partitionId), revisions: document.selection.revisions } as const : selection) }, controller.signal);
       assertSelection(resolved);
       if (resolved.datasetId !== descriptor.id || (document && !sameRevisions(document.selection, resolved))) throw new Error('Pinned revision/transform unavailable');
-      if (model?.binding.partitionIds.length && (resolved.revisions.length !== model.binding.partitionIds.length || !model.binding.partitionIds.every(id => resolved.revisions.some(r => r.partitionId === id)))) throw new Error('Latest partition scope mismatch');
+      if (model?.saveDataSelection !== false && model?.binding.partitionIds.length && (resolved.revisions.length !== model.binding.partitionIds.length || !model.binding.partitionIds.every(id => resolved.revisions.some(r => r.partitionId === id)))) throw new Error('Latest partition scope mismatch');
       let visualization = model?.visualization ?? document?.visualization ?? descriptor.presentation?.defaultVisualization ?? defaultVisualization(descriptor);
+      if (!model && !document && visualization && descriptor.capabilities.eventUnification && visualization.unifyEvents === undefined) visualization = { ...visualization, unifyEvents: true };
       if (!document && !model && visualization) visualization = withRequiredDimensions(descriptor, visualization);
       if (!document && !model && !descriptor.presentation?.defaultVisualization && visualization && ChartRenderer && chartAvailable('line', descriptor, visualization)) visualization = { ...visualization, kind: 'line' };
       if (!document && !model && visualization && !ChartRenderer) visualization = { ...visualization, kind: 'table' };
       if (!controller.signal.aborted) {
         if (!visualization) { setError(tRef.current('noFields')); return; }
-        const filters = model?.filters ?? document?.filters ?? descriptor.presentation?.defaultFilters ?? [];
+        let filters = model?.filters ?? document?.filters ?? descriptor.presentation?.defaultFilters ?? [];
+        if (model) {
+          const selectionField = descriptor.capabilities.multiSelection?.fieldId ?? descriptor.presentation?.primaryFilterFieldId;
+          const currentFilters = prior?.descriptor.id === descriptor.id ? prior.filters : descriptor.presentation?.defaultFilters ?? [];
+          filters = [...filters.filter(f => f.fieldId === selectionField ? model.saveDataSelection !== false : model.saveFilters !== false),
+            ...currentFilters.filter(f => f.fieldId === selectionField ? model.saveDataSelection === false : model.saveFilters === false)];
+        }
         const nextTitle = model?.title ?? document?.title ?? localize(descriptor.presentation?.views?.[0]?.label ?? descriptor.label, locale);
-        setSession({ descriptor, selection: resolved, visualization, filters, saved: document, model, partitionIds: model?.binding.partitionIds ?? (document ? document.selection.revisions.map(r => r.partitionId) : selection.partitionIds) });
+        setSession({ descriptor, selection: resolved, visualization, filters, saved: document, model, partitionIds: model?.saveDataSelection === false && prior?.descriptor.id === descriptor.id ? prior.partitionIds : model?.binding.partitionIds ?? (document ? document.selection.revisions.map(r => r.partitionId) : selection.partitionIds) });
         setBaseline(editableKey(descriptor.id, nextTitle, visualization, filters));
         setActiveView(document || model ? matchingView(descriptor, visualization, filters)?.id ?? '' : descriptor.presentation?.views?.[0]?.id ?? descriptor.id);
         setExpandedFilter(null);
@@ -232,6 +262,13 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   const primaryValues = primaryFilter?.op === 'in' ? primaryFilter.values : [];
   const scopeOptions = scopes.page?.values ?? [];
   const comparisonEnabled = primaryValues.length > 1;
+  const legendField = d?.presentation?.filters?.map(item => d.fields.find(field => field.id === item.fieldId)).find(field => field && v && visualizationDimensions(v).includes(field.id) && (v.kind === 'pie' || field.id !== v.x) && field.filters.includes('in'));
+  const legendFacets = useFacetOptions(provider, d, session?.selection, legendField, session?.filters ?? [], Boolean(legendField));
+  useEffect(() => {
+    if (legendFacets.page?.nextCursor && legendFacets.page.values.length < 1000 && !legendFacets.loading && !legendFacets.error) legendFacets.more();
+  }, [legendFacets.page?.nextCursor, legendFacets.loading, legendFacets.error]);
+  const legendFilter = session?.filters.find(f => f.fieldId === legendField?.id);
+  const legendValues = legendFilter?.op === 'in' ? legendFilter.values : [];
   const chart = useMemo(() => {
     if (!current || !session || session.visualization.kind === 'table' || !current.result.complete || !current.result.rows.length) return null;
     try { return { model: buildChartModel(session.descriptor, current.query, current.result, session.visualization.kind, locale, title, session.visualization.kind === 'pie' ? session.visualization.pie : undefined) }; }
@@ -307,19 +344,6 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     if (values.some(item => item === undefined)) return;
     setSession({ ...session, filters: [...session.filters.filter(f => f.fieldId !== primaryField.id), { fieldId: primaryField.id, op: 'in', values: values as (string | number | boolean)[] }] }); setNotice('');
   }
-  async function selectView(view: DatasetView) {
-    if (!session) return;
-    if (dirty && !await confirmAction('discardChanges', title)) return;
-    const previous = session.descriptor.presentation?.views?.find(item => item.id === activeView);
-    const replaced = new Set([...(previous?.filters ?? []).map(f => f.fieldId), ...view.filters.map(f => f.fieldId)]);
-    const visualization = withRequiredDimensions(session.descriptor, ChartRenderer ? view.visualization : { ...view.visualization, kind: 'table' });
-    if (!visualization) { setError(t('invalid')); return; }
-    const filters = [...session.filters.filter(f => !replaced.has(f.fieldId)), ...view.filters];
-    const nextTitle = localize(view.label, locale);
-    setSession({ ...session, visualization, filters, model: undefined, saved: undefined });
-    setBaseline(editableKey(session.descriptor.id, nextTitle, visualization, filters));
-    setTitle(nextTitle); setActiveView(view.id); setNotice('');
-  }
   function applyFilters(filters: Filter[]) {
     if (!session) return;
     const multi = session.descriptor.capabilities.multiSelection;
@@ -337,23 +361,9 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     const view = session.descriptor.presentation?.views?.find(item => item.id === activeView);
     applyFilters([...session.filters.filter(f => f.fieldId === primaryField?.id), ...(view?.filters ?? [])]);
   }
-  async function save() {
-    if (!store || !session || !complete || !title.trim()) return;
-    if (title.trim().length > 30 && title !== session.saved?.title) { setError(t('titleLimit')); return; }
-    const controller = new AbortController(); operation.current?.abort(); operation.current = controller;
-    const original = session;
-    setWorking(true); setError('');
-    try {
-      const document = makeAnalysis(session.descriptor, session.selection, session.visualization, session.filters, title === session.saved?.title ? title : title.trim(), session.saved);
-      const saved = parseAnalysisDocument(await store.save(document, document.revision, controller.signal), session.descriptor);
-      if (saved.id !== document.id || saved.revision === null || !sameRevisions(saved.selection, document.selection) || JSON.stringify(saved.visualization) !== JSON.stringify(document.visualization) || JSON.stringify(saved.filters) !== JSON.stringify(document.filters) || saved.title !== document.title) throw new Error('Store changed analysis content');
-      if (!controller.signal.aborted && sessionRef.current === original) { setSession({ ...original, saved }); setTitle(saved.title); setBaseline(editableKey(original.descriptor.id, saved.title, original.visualization, original.filters)); setNotice('saved'); setStoreRevision(n => n + 1); }
-    } catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); }
-    finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
-  }
   async function restore(model = false, selectedModelId?: string, edit = false) {
     const target = model ? modelStore : store;
-    const id = model ? selectedModelId ?? modelId : savedId;
+    const id = selectedModelId ?? (model ? modelId : savedId);
     if (!target || !id || (dirty && !await confirmAction('discardChanges', title))) return;
     const controller = new AbortController(); operation.current?.abort(); operation.current = controller;
     setWorking(true); setError('');
@@ -366,15 +376,18 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     } catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
   }
-  async function saveModel(asNew = false) {
-    if (!modelSaveAvailable || !store || !modelStore || !session || !complete || !title.trim()) return;
-    if (title.trim().length > 30 && (asNew || title !== session.model?.title)) { setError(t('titleLimit')); return; }
+  async function saveModel(asNew = false, name = title) {
+    if (!modelSaveAvailable || !store || !modelStore || !session || !complete || !name.trim()) return;
+    if (name.trim().length > 30 && (asNew || name !== session.model?.title)) { setError(t('titleLimit')); return; }
     const controller = new AbortController(); operation.current?.abort(); operation.current = controller;
     const original = session; setWorking(true); setError('');
     try {
       const previous = asNew ? undefined : session.model;
-      const saveTitle = previous && title === previous.title ? title : title.trim();
-      const document = requiresV3 ? makeModelV3(session.descriptor, session.partitionIds, session.visualization, session.filters, saveTitle, previous) : makeModel(session.descriptor, session.partitionIds, session.visualization, session.filters, saveTitle, previous?.documentVersion === 2 ? previous : undefined);
+      const saveTitle = previous && name === previous.title ? name : name.trim();
+      const selectionField = session.descriptor.capabilities.multiSelection?.fieldId ?? session.descriptor.presentation?.primaryFilterFieldId;
+      const storedFilters = session.filters.filter(filter => filter.fieldId === selectionField ? saveDataSelection : saveFilters);
+      const partitions = saveDataSelection ? session.partitionIds : [];
+      const document = parseSavedModelDocument({ ...(requiresV3 ? makeModelV3(session.descriptor, partitions, session.visualization, storedFilters, saveTitle, previous) : makeModel(session.descriptor, partitions, session.visualization, storedFilters, saveTitle, previous?.documentVersion === 2 ? previous : undefined)), saveFilters, saveDataSelection }, session.descriptor);
       const response = canStoreV3 ? await store.modelsV3!.save(document, document.revision, controller.signal) : document.documentVersion === 2 ? await store.models!.save(document, document.revision, controller.signal) : undefined;
       const saved = parseSavedModelDocument(response, session.descriptor);
       if (saved.revision === null || saved.revision === document.revision || JSON.stringify({ ...saved, revision: document.revision }) !== JSON.stringify(document)) throw new Error('Store changed model content');
@@ -395,14 +408,14 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   async function exportCsv() {
     if (!host?.exportFiles || !current || !session || !complete) return;
     const controller = new AbortController(); operation.current = controller; setWorking(true); setError('');
-    try { await host.exportFiles(exportTableResult(session.descriptor, current.query, current.result, title, session.visualization.table, locale), controller.signal); }
+    try { await host.exportFiles(exportTableResult(session.descriptor, current.query, current.result, title, session.visualization.table, locale).filter(file => file.mediaType.startsWith('text/csv')), controller.signal); }
     catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
   }
   async function exportImage() {
     if (!host?.exportImage || !chartExporter || !complete || !chart || !('model' in chart) || !chart.model || working) return;
     const controller = new AbortController(); operation.current?.abort(); operation.current = controller; setWorking(true); setError('');
-    try { const file = await chartExporter(chart.model, { format: imageFormat, showLegend: imageLegend, showLabels: imageLabels }, controller.signal); if (!controller.signal.aborted) await host.exportImage(file, controller.signal); }
+    try { const visible = visibleChart.current; const file = await chartExporter(visible?.source === chart.model ? visible.visible : chart.model, { format: imageFormat, showLegend: imageLegend, showLabels: imageLabels }, controller.signal); if (!controller.signal.aborted) await host.exportImage(file, controller.signal); }
     catch (e) { if (!controller.signal.aborted) setError(e && typeof e === 'object' && 'code' in e ? errorMessage(t, e) : t('imageExportFailed')); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
   }
@@ -415,24 +428,21 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   }
 
   return <section className="rds-sandbox" aria-label={t('sandbox')} aria-busy={loading || querying || working} lang={locale}>
-    {confirmation && <div className="rds-sb-confirm" role="alertdialog" aria-modal="true" aria-labelledby={`${uid}-confirm`} onKeyDown={e => { if (e.key === 'Escape') { confirmation.resolve(false); setConfirmation(null); } if (e.key === 'Tab') { const buttons = e.currentTarget.querySelectorAll('button'); e.preventDefault(); (document.activeElement === buttons[0] ? buttons[1] : buttons[0])?.focus(); } }}><h3 id={`${uid}-confirm`}>{t(confirmation.kind)}</h3><p>{confirmation.title}</p><button type="button" autoFocus onClick={() => { confirmation.resolve(false); setConfirmation(null); }}>{t('cancel')}</button><button type="button" onClick={() => { confirmation.resolve(true); setConfirmation(null); }}>{t('confirm')}</button></div>}
-    <div className={`rds-sb-layout${editing ? '' : ' rds-sb-view-layout'}`} inert={Boolean(confirmation)}>
-      <aside className="rds-sb-panel rds-sb-data" aria-labelledby={`${uid}-datasets`}>
-        <h2 id={`${uid}-datasets`}>{t('datasets')}</h2>
+    {confirmation && <Modal alert label={t(confirmation.kind)} onClose={() => { confirmation.resolve(false); setConfirmation(null); }}><h3>{t(confirmation.kind)}</h3><p>{confirmation.title}</p><button type="button" onClick={() => { confirmation.resolve(false); setConfirmation(null); }}>{t('cancel')}</button><button type="button" onClick={() => { confirmation.resolve(true); setConfirmation(null); }}>{t('confirm')}</button></Modal>}
+    {saveDialog && <Modal label={t('saveChoice')} onClose={() => setSaveDialog(false)}><h3 id={`${uid}-save`}>{t('saveChoice')}</h3>{session?.model && <label><input type="radio" name={`${uid}-save-mode`} checked={!saveAsNew} onChange={() => setSaveAsNew(false)} />{t('updateSelected')}: {session.model.title}</label>}<label><input type="radio" name={`${uid}-save-mode`} checked={saveAsNew} onChange={() => setSaveAsNew(true)} />{t('newModel')}</label>{saveAsNew && <label>{t('newName')}<input maxLength={30} value={saveName} onChange={e => setSaveName(e.target.value)} /></label>}<label><input type="checkbox" checked={saveFilters} onChange={e => setSaveFilters(e.target.checked)} />{t('saveFiltersOption')}</label><label><input type="checkbox" checked={saveDataSelection} onChange={e => setSaveDataSelection(e.target.checked)} />{t('saveDataSelectionOption')}</label><button type="button" onClick={() => setSaveDialog(false)}>{t('cancel')}</button><button type="button" disabled={saveAsNew && !saveName.trim()} onClick={() => { setSaveDialog(false); void saveModel(saveAsNew, saveAsNew ? saveName : title); }}>{t('confirm')}</button></Modal>}
+    {modelsDialog && <Modal label={t('models')} onClose={() => setModelsDialog(false)}><ModelManager t={t} items={[...modelList, ...savedList.map(item => ({ ...item, id: `legacy:${item.id}` }))]} onOpen={id => { setModelsDialog(false); void restore(!id.startsWith('legacy:'), id.startsWith('legacy:') ? id.slice(7) : id, true); }} onEdit={id => { setModelsDialog(false); void restore(!id.startsWith('legacy:'), id.startsWith('legacy:') ? id.slice(7) : id, true); }} onDelete={id => { setModelsDialog(false); void deleteModel(id); }} onRefresh={() => setStoreRevision(n => n + 1)} onRestoreDefaults={host?.restoreDefaultModels ? () => void restoreDefaults() : undefined} onNew={() => { setModelsDialog(false); setEditing(true); if (d) void requestLoad({ datasetId: d.id }); }} onRename={() => { setModelsDialog(false); setEditing(true); setTimeout(() => { titleInput.current?.focus(); titleInput.current?.select(); }, 0); }} disabled={working || loading} loading={modelsLoading} error={modelListError} activeTitle={session?.model?.title} /><button type="button" onClick={() => setModelsDialog(false)}>{t('close')}</button></Modal>}
+    {exportDialog && <Modal label={t('export')} onClose={() => setExportDialog(false)}><h3>{t('export')}</h3><label>{t('imageFormat')}<select value={imageFormat} disabled={working} onChange={e => setImageFormat(e.target.value as ImageExportArtifact['format'])}><option value="svg">SVG</option><option value="png">PNG</option></select></label><label><input type="checkbox" checked={imageLegend} onChange={e => setImageLegend(e.target.checked)} />{t('imageLegend')}</label>{v?.kind === 'pie' && <label><input type="checkbox" checked={imageLabels} onChange={e => setImageLabels(e.target.checked)} />{t('imageLabels')}</label>}<button type="button" onClick={() => setExportDialog(false)}>{t('cancel')}</button><button type="button" onClick={() => { setExportDialog(false); void exportImage(); }}>{t('export')}</button></Modal>}
+    <div className={`rds-sb-layout${editing ? '' : ' rds-sb-view-layout'}`} inert={Boolean(confirmation || saveDialog || modelsDialog || exportDialog)}>
+      <aside className="rds-sb-panel rds-sb-data" aria-label={t('filters')}>
         {catalog === null ? <p role="status">{t('loading')}</p> : catalog.length === 0 ? <p>{t('empty')}</p> : catalog.length > 1 ? <label>{t('dataset')}<select disabled={working || loading} value={load?.datasetId ?? ''} onChange={e => void requestLoad({ datasetId: e.target.value })}>{catalog.map(item => <option key={item.id} value={item.id}>{localize(item.label, locale)}</option>)}</select></label> : null}
         {primaryField && provider.facet && !d?.capabilities.multiSelection && <div className="rds-sb-scope" inert={!editing}><label>{localize(primaryField.label, locale)}<select disabled={working || !editing || scopes.loading || !scopeOptions.length} value={primaryValues.length ? JSON.stringify(primaryValues[0]) : ''} onChange={e => changeScope(e.target.value)}>{!primaryValues.length && <option value="">{t(primaryFilter ? 'advancedFilters' : 'all')}</option>}{primaryValues.length > 0 && !scopeOptions.some(item => item.value === primaryValues[0]) && <option value={JSON.stringify(primaryValues[0])}>{fieldValueLabel(primaryField, primaryValues[0]!, locale)}</option>}{scopeOptions.map(item => <option key={JSON.stringify(item.value)} value={JSON.stringify(item.value)}>{fieldValueLabel(primaryField, item.value, locale, item.label)}</option>)}</select></label>{scopes.page?.nextCursor && <button type="button" disabled={scopes.loading || scopeOptions.length >= 1000} onClick={scopes.more}>{t('more')}</button>}{scopes.error && <p role="alert">{t('error')}</p>}</div>}
-        {d && session && modelsAvailable && <ModelManager t={t} items={modelList} defaultModelIds={host?.defaultModelIds} onOpen={id => void restore(true, id)} onEdit={id => void restore(true, id, true)} onDelete={id => void deleteModel(id)} onRefresh={() => setStoreRevision(n => n + 1)} onRestoreDefaults={host?.restoreDefaultModels ? () => void restoreDefaults() : undefined} onNew={() => { setEditing(true); void requestLoad({ datasetId: d.id }); }} onRename={() => { setEditing(true); titleInput.current?.focus(); titleInput.current?.select(); }} onCopy={editing && (session.model || session.saved) && complete && modelSaveAvailable ? () => void saveModel(true) : undefined} disabled={working || loading} loading={modelsLoading} error={modelListError} activeTitle={session.model?.title}
-          views={d.presentation?.views?.length ? <nav className="rds-sb-dataset-list" aria-label={t('datasetViews')}>{d.presentation.views.map(view => <button type="button" key={view.id} disabled={working} aria-pressed={activeView === view.id} onClick={() => void selectView(view)}><Icon name="dataset" /><span>{localize(view.label, locale)}</span></button>)}</nav> : undefined}
-          legacy={savedList.length > 0 && <details className="rds-sb-legacy"><summary>{t('restore')}</summary><label>{t('restore')}<select disabled={working} value={savedId} onChange={e => setSavedId(e.target.value)}>{savedList.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</select></label><button type="button" disabled={working || !savedId} onClick={() => void restore()}>{t('open')}</button></details>}
-        />}
-        {!modelsAvailable && d && Boolean(d.presentation?.views?.length) && <nav className="rds-sb-dataset-list" aria-label={t('datasetViews')}>{d.presentation!.views!.map(view => <button type="button" key={view.id} disabled={working} aria-pressed={activeView === view.id} onClick={() => void selectView(view)}><Icon name="dataset" /><span>{localize(view.label, locale)}</span></button>)}</nav>}
+        {store && <button type="button" onClick={() => setModelsDialog(true)}>{t('models')}</button>}
         {session && <section id={`${uid}-filters`} className="rds-sb-filter-section" aria-labelledby={`${uid}-filters-heading`} inert={!editing}>
           <div className="rds-sb-section-heading"><h3 id={`${uid}-filters-heading`}>{t('filters')}</h3>{session.filters.length > 0 && <button className="rds-sb-text-button" type="button" disabled={working} onClick={clearUserFilters}>{t('clear')}</button>}</div>
           <QuickFilters descriptor={session.descriptor} selection={session.selection} provider={provider} filters={session.filters} onChange={applyFilters} locale={locale} t={t} expanded={expandedFilter} onExpand={setExpandedFilter} disabled={working} />
           {profile && <div className="rds-sb-filter-routing" role="note"><p>{t('displayFilters')}: {profile.displayFilterFields.map(id => localize(d!.fields.find(f => f.id === id)!.label, locale)).join(', ')}</p><p>{t('populationFilters')}: {session.filters.filter(f => !profile.displayFilterFields.includes(f.fieldId)).map(filter => localize(d!.fields.find(f => f.id === filter.fieldId)!.label, locale)).join(', ') || t('none')}</p></div>}
           <details className="rds-sb-advanced" open={advancedOpen} onToggle={e => setAdvancedOpen(e.currentTarget.open)}><summary>{t('advancedFilters')}</summary>{advancedOpen && <FilterEditor key={session.descriptor.id} descriptor={session.descriptor} selection={session.selection} provider={provider} filters={session.filters} onChange={applyFilters} locale={locale} t={t} />}</details>
         </section>}
-        {store && !modelsAvailable && savedList.length > 0 && <div className="rds-sb-saved"><label>{t('restore')}<select disabled={working} value={savedId} onChange={e => setSavedId(e.target.value)}>{savedList.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}</select></label><button type="button" disabled={working || !savedId} onClick={() => void restore()}>{t('open')}</button></div>}
       </aside>
 
       <section className="rds-sb-panel rds-sb-result" aria-labelledby={`${uid}-result`}>
@@ -440,16 +450,9 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
         <div className="rds-sb-mode" role="group" aria-label={t('configuration')}><button type="button" aria-pressed={!editing} onClick={() => setEditing(false)}>{t('viewMode')}</button><button type="button" aria-pressed={editing} onClick={() => setEditing(true)}>{t('editMode')}</button></div>
         <div className="rds-sb-toolbar">
           <div className="rds-sb-chart-types" role="group" aria-label={t('visualizationType')}>{session && d && v && (['line', 'bar', 'table', 'pie', 'scatter'] as const).filter(kind => d.capabilities.charts.includes(kind) && (kind === 'table' || ChartRenderer)).map(kind => <button key={kind} type="button" disabled={!editing || working || (kind === 'line' ? !dimensions.some(f => f.ordered && d.metrics.find(m => m.id === v.metric.metricId)!.groupableBy.includes(f.id)) : !chartAvailable(kind, d, v))} aria-pressed={v.kind === kind} onClick={() => update({ kind })}><Icon name={kind} />{t(kind)}</button>)}</div>
-          <div className="rds-sb-actions">{modelsAvailable && (!session?.saved || !legacySave) ? <button type="button" disabled={!editing || !modelSaveAvailable || !complete || !title.trim() || working} onClick={() => void saveModel()}><Icon name="save" />{t('saveModel')}</button> : store && legacySave && <button type="button" disabled={!editing || !complete || !title.trim() || working} onClick={() => void save()}><Icon name="save" />{t('save')}</button>}
-          {host?.exportFiles && <button type="button" disabled={!complete || working} onClick={() => void exportCsv()}><Icon name="export" />{t('export')}</button>}</div>
+          <div className="rds-sb-actions">{modelsAvailable && <button type="button" disabled={!editing || !modelSaveAvailable || !complete || !title.trim() || working} onClick={() => { setSaveAsNew(!session?.model); setSaveName(title); setSaveFilters(session?.model?.saveFilters ?? true); setSaveDataSelection(session?.model?.saveDataSelection ?? true); setSaveDialog(true); }}><Icon name="save" />{t('saveModel')}</button>}
+          {v?.kind === 'table' ? host?.exportFiles && <button type="button" disabled={!complete || working} onClick={() => void exportCsv()}><Icon name="export" />{t('export')}</button> : host?.exportImage && chartExporter && <button type="button" disabled={!complete || working || !chart || !('model' in chart) || !chart.model} onClick={() => setExportDialog(true)}><Icon name="export" />{t('export')}</button>}</div>
         </div>
-        {host?.exportFiles && <p className="rds-sb-muted">{t('exportPrivacy')}</p>}
-        {host?.exportImage && chartExporter && v && v.kind !== 'table' && <details className="rds-sb-image-export"><summary>{t('exportImage')}</summary>
-          <label>{t('imageFormat')}<select value={imageFormat} disabled={working} onChange={e => setImageFormat(e.target.value as ImageExportArtifact['format'])}><option value="svg">SVG</option><option value="png">PNG</option><option value="jpeg">JPEG</option></select></label>
-          <label className="rds-sb-check"><input type="checkbox" checked={imageLegend} disabled={working} onChange={e => setImageLegend(e.target.checked)} />{t('imageLegend')}</label>
-          {v.kind === 'pie' && <label className="rds-sb-check"><input type="checkbox" checked={imageLabels} disabled={working} onChange={e => setImageLabels(e.target.checked)} />{t('imageLabels')}</label>}
-          <p className="rds-sb-muted">{t('imageHelp')}</p><button type="button" disabled={working || !complete || !chart || !('model' in chart) || !chart.model} onClick={() => void exportImage()}>{t('exportImage')}</button>
-        </details>}
         <div className="rds-sb-feedback">
         {(loading || querying || working) && <p role="status">{t('loading')}</p>}
         {notice && <p role="status">{t(notice)}</p>}
@@ -465,8 +468,15 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
           {current?.result.rows.length === 0 && v?.kind !== 'table' && <p role="status">{t('noRows')}</p>}
           {chart && 'model' in chart && chart.model && chart.model.series.length > 12 && <p className="rds-sb-muted" role="note">{t('manySeries')}</p>}
           {chart && 'model' in chart && Boolean(chart.model?.omitted) && <p role="status">{t('omitted')}: {chart.model!.omitted}</p>}
-          {chart && ('error' in chart ? <p role="alert">{chart.error} {t('refineChart')}</p> : ChartRenderer && chart.model ? <figure className="rds-sb-chart"><ChartBoundary key={`${current?.query.requestId}-${locale}`} fallback={t('error')}><ChartRenderer model={chart.model} locale={locale} /></ChartBoundary><figcaption>{t('chartHelp')}</figcaption></figure> : null)}
-          {v?.kind === 'table' && current && d && <ResultTable descriptor={d} visualization={v} result={current.result} configuration={v.table} onConfiguration={table => update({ table })} editable={editing} page={page} setPage={setPage} locale={locale} t={t} uid={`${uid}-main`} />}
+          {chart && ('error' in chart ? <p role="alert">{chart.error} {t('refineChart')}</p> : ChartRenderer && chart.model ? <figure className="rds-sb-chart"><ChartBoundary key={`${current?.query.requestId}-${locale}`} fallback={t('error')}><ChartRenderer model={chart.model} locale={locale} onVisibleModelChange={visible => { visibleChart.current = { source: chart.model!, visible }; }} legendSelection={legendField && session && legendFacets.page ? { fieldId: legendField.id, options: legendFacets.page.values.map(item => ({ value: item.value, label: fieldValueLabel(legendField, item.value, locale, item.label) })), selected: legendValues, disabled: !editing || working || querying || loading, onToggle: value => {
+            if (!editing || working || querying || loading || !legendFacets.page?.values.some(item => item.value === value)) return;
+            const selected = legendFilter?.op === 'in' ? legendFilter.values : [];
+            const values = selected.includes(value) ? selected.filter(item => item !== value) : [...selected, value];
+            const maximum = session.descriptor.capabilities.multiSelection?.fieldId === legendField.id ? session.descriptor.capabilities.multiSelection.maxValues : 200;
+            if (values.length > maximum) { setError(t('selectionLimit')); return; }
+            applyFilters([...session.filters.filter(f => f.fieldId !== legendField.id), ...(values.length ? [{ fieldId: legendField.id, op: 'in' as const, values }] : [])]);
+          } } : undefined} /></ChartBoundary><figcaption>{t('chartHelp')}</figcaption></figure> : null)}
+          {v?.kind === 'table' && current && d && <ResultTable descriptor={d} visualization={v} unifiedEvents={Boolean(current.query.unifyEvents)} result={current.result} configuration={v.table} onConfiguration={table => update({ table })} editable={editing} page={page} setPage={setPage} locale={locale} t={t} uid={`${uid}-main`} />}
           {!current && !error && <div className="rds-sb-chart-placeholder">{loading || querying ? t('loading') : t('chooseDataset')}</div>}
         </div>
         {d && session && <details className="rds-sb-provenance"><summary>{t('provenance')}</summary><p>{t('pinned')}</p><ul>{d.sources.map((source, i) => <li key={i}>{source.name} — {source.attribution} — {source.license}</li>)}</ul><h3>{t('revisions')}</h3><ul>{session.selection.revisions.map(r => <li key={r.partitionId}>{r.partitionId}: {r.revisionId} · {r.sourceDataAt ?? '—'}</li>)}</ul><p>{session.selection.transformationVersion}</p>{d.limitations.length > 0 && <><h3>{t('limitations')}</h3><ul>{d.limitations.map((limitation, i) => <li key={i}>{localize(limitation, locale)}</li>)}</ul></>}</details>}
@@ -478,7 +488,7 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
           <details className="rds-sb-config-section" open><summary>{t('fields')}</summary><Bindings descriptor={d} value={v} onChange={update} onProfileChange={chooseCalculation} locale={locale} t={t} disabled={working} />{profile && <p className="rds-sb-muted">{localize(profile.description, locale)}</p>}</details>
           {v.kind === 'table' && <TableSummary descriptor={d} value={v} onApply={next => update(next, 'summaryApplied')} locale={locale} t={t} disabled={working} />}
           {v.kind === 'pie' && <PieOptions value={v.pie} onChange={pie => update({ pie })} disabled={working} t={t} />}
-          <TableColumns descriptor={d} value={v} onChange={table => update({ table })} locale={locale} t={t} disabled={working} />
+          {v.kind === 'table' && <TableColumns descriptor={d} value={v} onChange={table => update({ table })} locale={locale} t={t} disabled={working} />}
           <details className="rds-sb-config-section" open><summary>{t('aggregation')}</summary>{metric.aggregations.length === 1 || profile ? <div className="rds-sb-readonly"><span>{t('aggregationFunction')}</span><output>{t(v.metric.aggregation)}</output></div> : <label>{t('aggregationFunction')}<select disabled={working} value={v.metric.aggregation} onChange={e => update({ metric: { ...v.metric, aggregation: e.target.value as typeof v.metric.aggregation } })}>{metric.aggregations.map(aggregation => <option key={aggregation} value={aggregation}>{t(aggregation)}</option>)}</select></label>}
             {!profile && (!d.capabilities.runningSumProfiles?.length || v.runningSum) && v.extraDimensions === undefined && !['pie', 'scatter'].includes(v.kind) && d.capabilities.runningSum && metric.supportsRunningSum && v.metric.aggregation === 'sum' && dimensions.find(f => f.id === v.x)?.ordered && <><label className="rds-sb-check"><input type="checkbox" disabled={working} checked={v.runningSum} onChange={e => update({ runningSum: e.target.checked })} />{t('runningSum')}</label>{d.capabilities.runningSumScopes?.includes('beforeDisplayFilter') && <label>{t('runningSum')}<select disabled={working} value={v.cumulativeScope ?? 'filteredSelection'} onChange={e => update({ cumulativeScope: e.target.value as VisualizationSpec['cumulativeScope'] })}>{(d.capabilities.runningSumScopes ?? ['filteredSelection']).map(scope => <option key={scope} value={scope}>{t(scope)}</option>)}</select></label>}<p className="rds-sb-muted">{t(v.cumulativeScope === 'beforeDisplayFilter' ? 'beforeDisplayHelp' : 'cumulativeHelp')}</p></>}
           </details>
@@ -490,13 +500,14 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
               <p className="rds-sb-muted">{t('comparisonHint')}</p>
             </> : <label>{t('comparison')}<select disabled={working || Boolean(v.comparison && (metric.requiredDimensions?.includes(v.comparison) || d.capabilities.multiSelection?.fieldId === v.comparison || d.metrics.find(m => m.id === v.secondaryMetric?.metricId)?.requiredDimensions?.includes(v.comparison)))} value={v.comparison ?? ''} onChange={e => update({ comparison: e.target.value || null, ...(d.capabilities.maxDimensions < 3 ? { series: null } : {}) })}><option value="">{t('none')}</option>{dimensions.filter(f => (d.capabilities.comparisonDimensions.includes(f.id) || d.capabilities.multiSelection?.fieldId === f.id) && f.id !== v.x && f.id !== v.series && metric.groupableBy.includes(f.id) && (!v.secondaryMetric || d.metrics.find(m => m.id === v.secondaryMetric?.metricId)?.groupableBy.includes(f.id))).map(f => <option key={f.id} value={f.id}>{localize(f.label, locale)}</option>)}</select></label>}
           </details>}
+          {d.capabilities.eventUnification && <details className="rds-sb-config-section"><summary>{t('chartBehavior')}</summary><label className="rds-sb-check"><input type="checkbox" disabled={working || !eventUnificationAvailable(d, session.filters)} checked={Boolean(v.unifyEvents)} onChange={e => update({ unifyEvents: e.target.checked })} />{t('unifyEvents')}</label></details>}
         </>}
       </aside>}
     </div>
   </section>;
 }
 
-function ResultTable({ descriptor, visualization, result, configuration, onConfiguration, editable, page, setPage, locale, t, uid }: { descriptor: DatasetDescriptor; visualization?: VisualizationSpec; result: QueryResult; configuration?: TableConfiguration; onConfiguration: (table: TableConfiguration) => void; editable: boolean; page: number; setPage: (page: number) => void; locale: string; t: Translate; uid: string }) {
+function ResultTable({ descriptor, visualization, unifiedEvents, result, configuration, onConfiguration, editable, page, setPage, locale, t, uid }: { descriptor: DatasetDescriptor; visualization?: VisualizationSpec; unifiedEvents: boolean; result: QueryResult; configuration?: TableConfiguration; onConfiguration: (table: TableConfiguration) => void; editable: boolean; page: number; setPage: (page: number) => void; locale: string; t: Translate; uid: string }) {
   const format = useMemo(() => createValueFormatter(locale), [locale]);
   const logical = logicalColumns(descriptor, result);
   const available = result.columns.filter(c => logical.some(column => column.id === c.id) || configuration?.columns.includes(c.id));
@@ -512,6 +523,7 @@ function ResultTable({ descriptor, visualization, result, configuration, onConfi
   const visibleRows = rows.slice(safePage * pageSize, (safePage + 1) * pageSize);
   const groupColumn = columns.find(c => c.id === groupBy);
   const cellValue = (row: QueryResult['rows'][number], column: QueryResult['columns'][number]) => {
+    if (unifiedEvents && column.id === descriptor.capabilities.eventUnification?.fieldId) return t('unifiedEvents');
     const field = descriptor.fields.find(f => f.id === column.id);
     const label = field?.labelField ? row.values[field.labelField] : undefined;
     return typeof label === 'string' && label.trim() ? label : field ? fieldValueLabel(field, row.values[column.id]!, locale) : format(row.values[column.id]!, column.type);
