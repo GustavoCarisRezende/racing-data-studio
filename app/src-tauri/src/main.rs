@@ -3,10 +3,36 @@
 mod f1;
 mod desktop;
 mod reset;
+#[cfg(debug_assertions)]
+mod dev_assets;
 
 use tauri::Manager;
 
 fn main() {
+    #[cfg(debug_assertions)]
+    let context = {
+        let reset_restart = reset::take_restart_fallback_request();
+        let mut context = tauri::generate_context!(
+            "tauri.conf.json",
+            assets = if reset_restart {
+                dev_assets::DevelopmentAssets::from_dist(
+                    &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"))
+            } else {
+                dev_assets::DevelopmentAssets::empty()
+            }
+        );
+        if reset_restart {
+            // Only this replacement process bypasses the Vite URL. Its assets
+            // are an immutable snapshot; normal development remains HMR-backed.
+            context.config_mut().build.dev_url = None;
+        }
+        context
+    };
+    #[cfg(not(debug_assertions))]
+    let context = tauri::generate_context!();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Arc::new(f1::commands::SyncState::default()))
@@ -22,6 +48,6 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("failed to run Racing Data Studio");
 }

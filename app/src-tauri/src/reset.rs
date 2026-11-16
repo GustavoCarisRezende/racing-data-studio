@@ -10,6 +10,16 @@ const APP_ID: &str = "org.racingdatastudio.app";
 const MARKER_NAME: &str = ".org.racingdatastudio.app.reset-pending";
 const MARKER_CONTENT: &[u8] = b"racing-data-studio-reset-v1\n";
 const MARKER_MAX_BYTES: u64 = 64;
+const RESTART_FALLBACK_ENV: &str = "RACING_DATA_STUDIO_RESET_RESTART";
+
+/// Development-only handoff to the replacement process. The handoff flag is
+/// consumed before startup continues, so ordinary restarts keep using Vite HMR.
+#[cfg(debug_assertions)]
+pub fn take_restart_fallback_request() -> bool {
+    let requested = std::env::var_os(RESTART_FALLBACK_ENV).is_some_and(|value| value == "1");
+    std::env::remove_var(RESTART_FALLBACK_ENV);
+    requested
+}
 
 fn marker_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -138,6 +148,10 @@ pub fn reset_application(
     }
     state.reserve_reset().map_err(|_| "RESET_BUSY".to_string())?;
     let result = reset_targets(&app).and_then(|(targets, marker)| {
+        #[cfg(debug_assertions)]
+        crate::dev_assets::DevelopmentAssets::from_dist(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist"),
+        )?;
         let data_dir = targets
             .iter()
             .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(APP_ID))
@@ -154,6 +168,8 @@ pub fn reset_application(
         state.cancel_reset();
         return Err(error);
     }
+    #[cfg(debug_assertions)]
+    std::env::set_var(RESTART_FALLBACK_ENV, "1");
     app.request_restart();
     Ok(())
 }

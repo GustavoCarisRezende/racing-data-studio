@@ -164,6 +164,15 @@ boas-vindas. Arquivos vizinhos fora das raízes do app foram preservados. Esse t
 não usou os dados reais do usuário; o reinício ainda não foi verificado em Windows
 ou macOS.
 
+Em desenvolvimento, o Vite pode ser encerrado pelo CLI ao reiniciar o aplicativo.
+Por isso, o processo reaberto após a restauração usa uma cópia local da interface
+de `app/dist`, pelo protocolo interno do Tauri, sem depender de `127.0.0.1:1420`.
+O comando de desenvolvimento gera essa cópia antes de iniciar o Vite. A cópia é
+validada antes de aceitar a restauração; se estiver ausente ou inválida, a
+operação é recusada sem apagar os dados. O início normal de desenvolvimento
+continua usando Vite/HMR; para voltar ao HMR após uma restauração, encerre a
+instância de recuperação e execute novamente o comando de desenvolvimento.
+
 Com o aplicativo fechado:
 
 ```sh

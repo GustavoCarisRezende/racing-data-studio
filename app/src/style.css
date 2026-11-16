@@ -190,11 +190,11 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .confirm-dialog>div { display:flex; justify-content:flex-end; gap:10px; }
 .confirm-dialog .danger { background:#c91e3c; }
 .shell-error { position:fixed; z-index:5; right:16px; bottom:90px; max-width:min(420px,calc(100vw - 32px)); padding:12px; border:1px solid #ff5470; border-radius:8px; background:#2b1820; color:white; }
-.tutorial-menu { flex:none; color:#f6f7f9; background:transparent; border:1px solid #536071; border-radius:8px; padding:9px 12px; font:inherit; font-size:13px; cursor:pointer; }
+.tutorial-menu { flex:none; color:#f6f7f9; background:transparent; border:1px solid #536071; border-radius:8px; padding:0; font:inherit; font-size:13px; cursor:pointer; }
 .tutorial-menu:hover { background:#252c38; }
 .tutorial-menu { position:relative; }
 .header-actions { display:flex; align-items:center; gap:16px; margin-left:auto; }
-.tutorial-menu summary { cursor:pointer; display:flex; align-items:center; justify-content:center; list-style:none; }
+.tutorial-menu summary { cursor:pointer; display:flex; align-items:center; justify-content:center; list-style:none; padding:9px 12px; border-radius:inherit; }
 .tutorial-menu summary::-webkit-details-marker { display:none; }
 .tutorial-menu summary svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
 .tutorial-menu-options { position:absolute; z-index:20; top:calc(100% + 8px); right:0; width:max-content; max-width:calc(100vw - 24px); padding:8px; border:1px solid #536071; border-radius:8px; background:#1b1f28; box-shadow:0 6px 20px #0008; }
@@ -232,7 +232,8 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 @media (max-width:760px) {
   .masthead { gap:4px; padding:0 10px; }
   .brand-image { width:78px; }
-  .tutorial-menu { padding:6px 5px; font-size:10px; white-space:nowrap; }
+  .tutorial-menu { font-size:10px; white-space:nowrap; }
+  .tutorial-menu summary { padding:6px 5px; }
   .select-wrap select { max-width:95px; padding-left:7px; padding-right:24px; font-size:10px; }
   .tutorial-skip-fixed { top:84px; right:10px; }
   .tutorial-card { max-height:min(70dvh,calc(100vh - 120px)); overflow:auto; }
