@@ -200,6 +200,17 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .tutorial-menu-options { position:absolute; z-index:20; top:calc(100% + 8px); right:0; width:max-content; max-width:calc(100vw - 24px); padding:8px; border:1px solid #536071; border-radius:8px; background:#1b1f28; box-shadow:0 6px 20px #0008; }
 .tutorial-menu-options button { border:0; border-radius:5px; padding:10px 12px; color:#f6f7f9; background:transparent; font:inherit; cursor:pointer; }
 .tutorial-menu-options button:hover,.tutorial-menu-options button:focus-visible { background:#30394a; }
+.tutorial-menu-options hr { margin:5px 4px; border:0; border-top:1px solid #536071; }
+.tutorial-menu-options .reset-menu-option { color:#ff8295; }
+.tutorial-menu-options .reset-menu-option:disabled { color:#ff8295; opacity:.7; cursor:not-allowed; }
+.reset-dialog { width:min(520px,calc(100vw - 32px)); }
+.reset-dialog h2 { color:#ff8295; }
+.reset-dialog .reset-error { color:#ff9aac; }
+.reset-dialog .reset-status { color:#d0d7e3; }
+.reset-dialog-actions { display:flex; justify-content:space-between; gap:12px; margin-top:22px; }
+.reset-dialog-actions button { font:inherit; border:1px solid #536071; border-radius:8px; padding:10px 16px; background:transparent; color:#f3f5fa; cursor:pointer; }
+.reset-dialog-actions .danger { border-color:#c91e3c; background:#c91e3c; }
+.reset-dialog-actions button:disabled { opacity:.55; cursor:not-allowed; }
 .tutorial-layer { position:fixed; inset:0; z-index:1000; pointer-events:none; }
 .tutorial-shield { position:fixed; z-index:1000; background:rgba(0,0,0,.72); pointer-events:auto; }
 .tutorial-spotlight { position:fixed; z-index:1000; border:2px solid #ff3152; border-radius:8px; box-shadow:0 0 24px rgba(255,49,82,.42); pointer-events:none; transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease; }

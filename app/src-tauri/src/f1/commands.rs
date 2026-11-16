@@ -1,6 +1,6 @@
 use super::{event_archive, jolpica, repository::F1Repository};
 use serde_json::{json, Value};
-use std::{fs::{self, File, OpenOptions}, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}};
+use std::{fs::{File, OpenOptions}, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -114,6 +114,17 @@ impl Drop for Guard {
     }
 }
 impl SyncState {
+    pub fn reserve_reset(&self) -> Result<(), String> {
+        self.busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| "Não é possível restaurar enquanto uma sincronização está em andamento".into())
+    }
+
+    pub fn cancel_reset(&self) {
+        self.busy.store(false, Ordering::Release);
+    }
+
     fn begin(self: &Arc<Self>, year: u16) -> Result<Guard, String> {
         self.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).map_err(|_| "Another synchronization is already running")?;
         if let Ok(mut progress) = self.progress.lock() { *progress = json!({"year":year,"phase":"starting","offset":0}); }
@@ -126,10 +137,14 @@ impl SyncState {
 
 // OS advisory lock remains held for the entire download and transaction, also
 // across two app processes. Dropping the file (including on crash) releases it.
-fn acquire_file_lock(data_dir: &Path) -> Result<File, String> {
-    let dir = data_dir.join("categories");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let file = OpenOptions::new().write(true).create(true).truncate(false).open(dir.join("f1-sync.lock")).map_err(|e| e.to_string())?;
+pub(crate) fn acquire_file_lock(data_dir: &Path) -> Result<File, String> {
+    let parent = data_dir.parent().ok_or_else(|| "App data directory has no parent".to_string())?;
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(parent.join(".org.racingdatastudio.app.f1-sync.lock"))
+        .map_err(|e| e.to_string())?;
     file.try_lock().map_err(|e| format!("Another synchronization may be running, or lock unavailable: {e}"))?;
     Ok(file)
 }
@@ -189,9 +204,14 @@ pub async fn f1_analysis_load(app: tauri::AppHandle, id: String) -> Result<Value
 }
 
 #[tauri::command]
-pub async fn f1_analysis_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+pub async fn f1_analysis_save(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.saved_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.saved_save(document, expected_revision)
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -216,19 +236,34 @@ pub async fn f1_model_load(app: tauri::AppHandle, id: String) -> Result<Value, S
     tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_load(&id)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub async fn f1_model_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+pub async fn f1_model_save(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.model_save(document, expected_revision)
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub async fn f1_model_delete(app: tauri::AppHandle, id: String, expected_revision: String) -> Result<(), String> {
+pub async fn f1_model_delete(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, id: String, expected_revision: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_delete(&id, &expected_revision)).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.model_delete(&id, &expected_revision)
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub async fn f1_models_restore_defaults(app: tauri::AppHandle) -> Result<usize, String> {
+pub async fn f1_models_restore_defaults(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>) -> Result<usize, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.models_restore_defaults()).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.models_restore_defaults()
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub async fn f1_models_v3_list(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
@@ -241,14 +276,24 @@ pub async fn f1_model_v3_load(app: tauri::AppHandle, id: String) -> Result<Value
     tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_load(&id)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub async fn f1_model_v3_save(app: tauri::AppHandle, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
+pub async fn f1_model_v3_save(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, document: Value, expected_revision: Option<String>) -> Result<Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_save(document, expected_revision)).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_save(document, expected_revision)
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub async fn f1_model_v3_delete(app: tauri::AppHandle, id: String, expected_revision: String) -> Result<(), String> {
+pub async fn f1_model_v3_delete(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, id: String, expected_revision: String) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_delete(&id, &expected_revision)).await.map_err(|e| e.to_string())?
+    let guard = state.inner().begin(1950)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let _lock = acquire_file_lock(&dir)?;
+        F1Repository::open(&dir).map_err(|e| e.to_string())?.model_v3_delete(&id, &expected_revision)
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -357,14 +402,26 @@ mod tests {
         assert!(state.begin(2025).is_ok());
     }
     #[test]
+    fn reset_reservation_rejects_active_sync_and_blocks_new_work() {
+        let state = Arc::new(SyncState::default());
+        let guard = state.begin(2024).unwrap();
+        assert!(state.reserve_reset().is_err());
+        drop(guard);
+        state.reserve_reset().unwrap();
+        assert!(state.begin(2025).is_err());
+        state.cancel_reset();
+        assert!(state.begin(2025).is_ok());
+    }
+    #[test]
     fn file_lock_rejects_a_second_open_until_released() {
-        let dir = std::env::temp_dir().join(format!("rds-lock-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let base = std::env::temp_dir().join(format!("rds-lock-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&base).unwrap();
+        let dir = base.join("org.racingdatastudio.app");
         let first = acquire_file_lock(&dir).unwrap();
         assert!(acquire_file_lock(&dir).is_err());
         drop(first);
         assert!(acquire_file_lock(&dir).is_ok());
-        std::fs::remove_file(dir.join("categories/f1-sync.lock")).unwrap();
-        std::fs::remove_dir(dir.join("categories")).unwrap();
-        std::fs::remove_dir(dir).unwrap();
+        std::fs::remove_file(base.join(".org.racingdatastudio.app.f1-sync.lock")).unwrap();
+        std::fs::remove_dir(base).unwrap();
     }
 }

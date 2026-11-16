@@ -12,7 +12,7 @@ import { nextTutorialStep, OnboardingTour } from './onboarding-tour';
 import { RestartConfirmation } from './restart-confirmation';
 import './style.css';
 
-function App() {
+export function App() {
   const [locale, setLocale] = useState<Locale>(() => navigator.language.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -21,11 +21,18 @@ function App() {
   const [dirty, setDirty] = useState(false);
   const [hasLocalSnapshots, setHasLocalSnapshots] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState(false);
   const fullscreenBusy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const resetDialogRef = useRef<HTMLDialogElement>(null);
+  const resetCancelRef = useRef<HTMLButtonElement>(null);
+  const resetBusyRef = useRef(false);
   const tutorialElements = useRef(new Map<string, HTMLElement>());
   const t = (key: keyof typeof messages['en-US']) => messages[locale][key];
+  const desktop = isTauri();
   const active = categories.find((category) => category.id === activeId);
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const filteredCategories = categories.filter((category) => normalize(t(category.name)).includes(normalize(query)));
@@ -36,6 +43,13 @@ function App() {
   useEffect(() => {
     if (tutorial.status === 'completed' || tutorial.status === 'skipped') writeTutorialStatus(tutorialStorage(), tutorial.status);
   }, [tutorial.status]);
+  useEffect(() => {
+    const dialog = resetDialogRef.current;
+    if (resetDialogOpen && dialog && !dialog.open) {
+      dialog.showModal();
+      resetCancelRef.current?.focus();
+    } else if (!resetDialogOpen && dialog?.open) dialog.close();
+  }, [resetDialogOpen]);
   const tutorialTarget = useCallback((target: string) => {
     const registered = tutorialElements.current.get(target);
     return registered?.isConnected ? registered : document.querySelector<HTMLElement>(`[data-tutorial-target="${target}"]`);
@@ -51,6 +65,24 @@ function App() {
     else restartTour();
   };
   const confirmRestartTour = () => { setConfirmRestart(false); restartTour(); };
+  const cancelReset = () => {
+    if (resetBusyRef.current) return;
+    setResetError(false);
+    setResetDialogOpen(false);
+  };
+  const resetApplication = async () => {
+    if (!desktop || resetBusyRef.current) return;
+    resetBusyRef.current = true;
+    setResetBusy(true);
+    setResetError(false);
+    try {
+      await invoke('reset_application');
+    } catch {
+      resetBusyRef.current = false;
+      setResetBusy(false);
+      setResetError(true);
+    }
+  };
   const continueWithoutTarget = (step: TutorialStep) => {
     if (step === 'category') { setActiveId('f1'); dispatchTutorial({ type: 'advance', step: 'sync-intro' }); return; }
     const next: Partial<Record<TutorialStep, TutorialStep>> = {
@@ -111,7 +143,14 @@ function App() {
       </div>
       <details className="tutorial-menu" onKeyDown={(event) => { if (event.key === 'Escape') event.currentTarget.open = false; }}>
         <summary aria-label={locale === 'pt-BR' ? 'Abrir menu' : 'Open menu'} title={locale === 'pt-BR' ? 'Menu' : 'Menu'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></summary>
-        <div className="tutorial-menu-options"><button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); beginRestart(); }}>{locale === 'pt-BR' ? 'Como usar o sistema' : 'How to use the system'}</button></div>
+        <div className="tutorial-menu-options">
+          <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); beginRestart(); }}>{locale === 'pt-BR' ? 'Como usar o sistema' : 'How to use the system'}</button>
+          <hr />
+          <button className="reset-menu-option" type="button" disabled={!desktop} title={!desktop ? t('resetDesktopOnly') : undefined} onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open');
+            if (desktop) { setResetError(false); setResetDialogOpen(true); }
+          }}>{t('resetSettings')}</button>
+        </div>
       </details>
       </div>
     </header>
@@ -148,7 +187,18 @@ function App() {
     <OnboardingTour state={tutorial} locale={locale} dispatch={dispatchTutorial} targetElement={tutorialTarget} hasLocalSnapshots={hasLocalSnapshots} onMissingTarget={continueWithoutTarget} onBack={backTutorial} />
     <dialog ref={dialogRef} aria-labelledby="about-title"><h2 id="about-title">{t('title')}</h2><h3>{t('aboutPurpose')}</h3><p>{t('aboutPurposeText')}</p><h3>{t('aboutStart')}</h3><p>{t('aboutStartText')}</p><h3>{t('aboutData')}</h3><p>{t('aboutDataText')}</p><h3>{t('aboutContribute')}</h3><p>{t('aboutContributeText')}</p><h3>{t('aboutLicenses')}</h3><p>{t('aboutLicensesText')}</p><button type="button" onClick={() => dialogRef.current?.close()}>{t('close')}</button></dialog>
     <RestartConfirmation open={confirmRestart} locale={locale} onCancel={() => setConfirmRestart(false)} onConfirm={confirmRestartTour} />
+    <dialog ref={resetDialogRef} className="reset-dialog" aria-modal="true" aria-labelledby="reset-title" aria-describedby="reset-description" onCancel={(event) => { event.preventDefault(); cancelReset(); }}>
+      <h2 id="reset-title">{t('resetSettings')}</h2>
+      <p id="reset-description">{t('resetWarning')}</p>
+      {resetBusy && <p className="reset-status" role="status">{t('resetPending')}</p>}
+      {resetError && <p className="reset-error" role="alert">{t('resetError')}</p>}
+      <div className="reset-dialog-actions">
+        <button className="danger" type="button" disabled={resetBusy} onClick={() => void resetApplication()}>{resetBusy ? t('resetPending') : t('resetConfirm')}</button>
+        <button ref={resetCancelRef} type="button" disabled={resetBusy} onClick={cancelReset}>{t('cancel')}</button>
+      </div>
+    </dialog>
   </div>;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+const rootElement = document.getElementById('root');
+if (rootElement) createRoot(rootElement).render(<StrictMode><App /></StrictMode>);

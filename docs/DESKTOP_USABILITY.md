@@ -145,6 +145,25 @@ os testes de desenvolvimento.
 
 ## Reset local exclusivo de desenvolvimento (Linux)
 
+O menu hambúrguer também oferece **Restaurar Configurações Padrão**, em
+vermelho após um separador. No desktop, a opção abre um aviso de exclusão
+permanente; abrir ou cancelar o aviso não limpa dados. Confirmar prepara a
+limpeza e o reinício do aplicativo. Cancelar recebe o foco inicial por segurança,
+mas a confirmação fica à esquerda e o cancelamento à direita.
+
+A build não executa o script Python: usa uma implementação nativa equivalente,
+sem depender de Python instalado. A limpeza deve ocorrer na inicialização antes
+de abrir o banco e o WebView; inclui o armazenamento local que registra a
+conclusão do tutorial. Exportações salvas fora dos diretórios do aplicativo não
+são apagadas. No navegador, a opção é indisponível.
+
+O fluxo nativo foi conferido no Linux/XWayland com diretórios XDG isolados:
+confirmação real via IPC, encerramento/reabertura, remoção dos arquivos de teste
+em dados/configuração/cache/estado, banco reiniciado sem importações e retorno às
+boas-vindas. Arquivos vizinhos fora das raízes do app foram preservados. Esse teste
+não usou os dados reais do usuário; o reinício ainda não foi verificado em Windows
+ou macOS.
+
 Com o aplicativo fechado:
 
 ```sh
