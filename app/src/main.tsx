@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { categories } from './categories/registry';
 import { messages, type Locale } from './i18n/messages';
@@ -7,6 +7,9 @@ import { isFullscreenShortcut, openProject, GITHUB_URL, runFullscreenToggle } fr
 import logo from './assets/rds-logo.svg';
 import background from './assets/header-background.svg';
 import categoryMark from './assets/category-mark.svg';
+import { initialTutorialState, readTutorialStatus, tutorialReducer, tutorialStorage, writeTutorialStatus, type TutorialStep } from './onboarding';
+import { nextTutorialStep, OnboardingTour } from './onboarding-tour';
+import { RestartConfirmation } from './restart-confirmation';
 import './style.css';
 
 function App() {
@@ -14,14 +17,65 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [shellError, setShellError] = useState('');
+  const [tutorial, dispatchTutorial] = useReducer(tutorialReducer, initialTutorialState);
+  const [dirty, setDirty] = useState(false);
+  const [hasLocalSnapshots, setHasLocalSnapshots] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const fullscreenBusy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const tutorialElements = useRef(new Map<string, HTMLElement>());
   const t = (key: keyof typeof messages['en-US']) => messages[locale][key];
   const active = categories.find((category) => category.id === activeId);
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const filteredCategories = categories.filter((category) => normalize(t(category.name)).includes(normalize(query)));
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  useEffect(() => {
+    if (readTutorialStatus(tutorialStorage()) === 'eligible') dispatchTutorial({ type: 'start' });
+  }, []);
+  useEffect(() => {
+    if (tutorial.status === 'completed' || tutorial.status === 'skipped') writeTutorialStatus(tutorialStorage(), tutorial.status);
+  }, [tutorial.status]);
+  const tutorialTarget = useCallback((target: string) => {
+    const registered = tutorialElements.current.get(target);
+    return registered?.isConnected ? registered : document.querySelector<HTMLElement>(`[data-tutorial-target="${target}"]`);
+  }, []);
+  const registerTutorialTarget = useCallback((target: string, element: HTMLElement | null) => {
+    if (element) tutorialElements.current.set(target, element);
+    else tutorialElements.current.delete(target);
+  }, []);
+  const setTutorialStep = useCallback((step: string) => dispatchTutorial({ type: 'advance', step: step as TutorialStep }), []);
+  const restartTour = () => { setActiveId(null); setQuery(''); setDirty(false); setHasLocalSnapshots(false); dispatchTutorial({ type: 'start' }); };
+  const beginRestart = () => {
+    if (dirty) setConfirmRestart(true);
+    else restartTour();
+  };
+  const confirmRestartTour = () => { setConfirmRestart(false); restartTour(); };
+  const continueWithoutTarget = (step: TutorialStep) => {
+    if (step === 'category') { setActiveId('f1'); dispatchTutorial({ type: 'advance', step: 'sync-intro' }); return; }
+    const next: Partial<Record<TutorialStep, TutorialStep>> = {
+      'sync-tab': 'sync-content', 'sync-year': 'snapshot-content', 'sync-run': 'snapshot-content',
+      'snapshots-tab': 'snapshots-content', 'source-tab': 'source-content',
+      'explore-tab': 'explore-content', 'sandbox-tab': 'models',
+    };
+    dispatchTutorial({ type: 'advance', step: next[step] ?? nextTutorialStep(step) ?? 'finish' });
+  };
+  const backTutorial = (step: TutorialStep) => {
+    if (step === 'category') {
+      setActiveId(null); dispatchTutorial({ type: 'back', step }); return;
+    }
+    const target = ({
+      'sync-tab': 'f1-sync-tab', 'sync-content': 'f1-sync-tab', 'sync-year': 'f1-sync-tab', 'sync-run': 'f1-sync-tab',
+      'snapshot-content': 'f1-sync-tab', 'snapshots-tab': 'f1-snapshots-tab', 'snapshots-content': 'f1-snapshots-tab',
+      'source-tab': 'f1-source-tab', 'source-content': 'f1-source-tab',
+      'explore-tab': 'f1-explore-tab', 'explore-content': 'f1-explore-tab',
+      'sandbox-tab': 'f1-sandbox-tab', models: 'f1-sandbox-tab', filters: 'f1-sandbox-tab',
+      seasons: 'f1-sandbox-tab', 'chart-types': 'f1-sandbox-tab', 'mode-switch': 'f1-sandbox-tab',
+      fields: 'f1-sandbox-tab', behavior: 'f1-sandbox-tab', 'visualization-title': 'f1-sandbox-tab', save: 'f1-sandbox-tab', export: 'f1-sandbox-tab',
+    } as Partial<Record<TutorialStep, string>>)[step];
+    if (target) tutorialTarget(target)?.click();
+    dispatchTutorial({ type: 'back', step });
+  };
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (isFullscreenShortcut(event) && isTauri()) {
@@ -45,6 +99,7 @@ function App() {
         <span className="brand-separator" aria-hidden="true" />
         <strong className="brand-text" aria-hidden="true">{t('title')}</strong>
       </div>
+      <div className="header-actions">
       <div className="locale-control">
         <label htmlFor="locale">{t('language')}</label>
         <div className="select-wrap">
@@ -54,10 +109,15 @@ function App() {
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 5 5-5" /></svg>
         </div>
       </div>
+      <details className="tutorial-menu" onKeyDown={(event) => { if (event.key === 'Escape') event.currentTarget.open = false; }}>
+        <summary aria-label={locale === 'pt-BR' ? 'Abrir menu' : 'Open menu'} title={locale === 'pt-BR' ? 'Menu' : 'Menu'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></summary>
+        <div className="tutorial-menu-options"><button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); beginRestart(); }}>{locale === 'pt-BR' ? 'Como usar o sistema' : 'How to use the system'}</button></div>
+      </details>
+      </div>
     </header>
     <main className="main">
       <img className="background-art" src={background} alt="" aria-hidden="true" />
-      <div className="content">{active ? <div className="module-screen"><button className="back" type="button" onClick={() => setActiveId(null)}>{t('back')}</button><active.Screen t={t} locale={locale} /></div> : <>
+      <div className="content">{active ? <div className="module-screen"><button className="back" type="button" onClick={() => { setActiveId(null); setDirty(false); setHasLocalSnapshots(false); }}>{t('back')}</button><active.Screen t={t} locale={locale} tutorial={{ step: tutorial.step, onStep: setTutorialStep, onTarget: registerTutorialTarget, onDirtyChange: setDirty, onLocalSnapshotsChange: setHasLocalSnapshots, hasLocalSnapshots }} /></div> : <>
         <section className="intro" aria-labelledby="categories-heading">
           <img className="intro-mark" src={categoryMark} alt="" aria-hidden="true" />
           <div className="intro-copy"><h1 id="categories-heading">{t('intro')}</h1><p>{t('subtitle')}</p></div>
@@ -68,7 +128,7 @@ function App() {
           <kbd>Ctrl + K</kbd>
         </div>
         <section className="category-list" aria-label={t('intro')}>
-          {filteredCategories.map((category) => <button className="category-card" key={category.id} type="button" onClick={() => setActiveId(category.id)} aria-label={t(category.openLabel)} aria-describedby={`category-${category.id}-description`}>
+          {filteredCategories.map((category) => <button className="category-card" key={category.id} type="button" data-tutorial-target={`category-${category.id}`} onClick={() => { setActiveId(category.id); setDirty(false); if (tutorial.step === 'category') dispatchTutorial({ type: 'advance', step: 'sync-intro' }); }} aria-label={t(category.openLabel)} aria-describedby={`category-${category.id}-description`}>
             <span className="card-accent" aria-hidden="true" /><category.Icon /><span className="card-divider" aria-hidden="true" />
             <span className="card-copy"><strong>{t(category.name)}</strong><span id={`category-${category.id}-description`}>{t(category.description)}</span></span>
             <svg className="card-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
@@ -85,7 +145,9 @@ function App() {
       </button>
     </footer>
     {shellError && <p className="shell-error" role="alert">{shellError}</p>}
+    <OnboardingTour state={tutorial} locale={locale} dispatch={dispatchTutorial} targetElement={tutorialTarget} hasLocalSnapshots={hasLocalSnapshots} onMissingTarget={continueWithoutTarget} onBack={backTutorial} />
     <dialog ref={dialogRef} aria-labelledby="about-title"><h2 id="about-title">{t('title')}</h2><h3>{t('aboutPurpose')}</h3><p>{t('aboutPurposeText')}</p><h3>{t('aboutStart')}</h3><p>{t('aboutStartText')}</p><h3>{t('aboutData')}</h3><p>{t('aboutDataText')}</p><h3>{t('aboutContribute')}</h3><p>{t('aboutContributeText')}</p><h3>{t('aboutLicenses')}</h3><p>{t('aboutLicensesText')}</p><button type="button" onClick={() => dialogRef.current?.close()}>{t('close')}</button></dialog>
+    <RestartConfirmation open={confirmRestart} locale={locale} onCancel={() => setConfirmRestart(false)} onConfirm={confirmRestartTour} />
   </div>;
 }
 

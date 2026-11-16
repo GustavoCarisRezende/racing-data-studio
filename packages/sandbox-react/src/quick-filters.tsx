@@ -38,22 +38,22 @@ export function useFacetOptions(provider: SandboxDataProvider, descriptor: Datas
     known: known.current, more: () => { if (state.page?.nextCursor) setPagination({ key, cursor: state.page.nextCursor }); } };
 }
 
-export function QuickFilters({ descriptor: d, selection, provider, filters, onChange, locale, t, expanded, onExpand, disabled }: {
+export function QuickFilters({ descriptor: d, selection, provider, filters, onChange, locale, t, expanded, onExpand, disabled, primaryTarget }: {
   descriptor: DatasetDescriptor; selection: ResolvedSelection; provider: SandboxDataProvider; filters: Filter[]; onChange: (filters: Filter[]) => void;
-  locale: string; t: Translate; expanded: string | null; onExpand: (fieldId: string | null) => void; disabled: boolean;
+  locale: string; t: Translate; expanded: string | null; onExpand: (fieldId: string | null) => void; disabled: boolean; primaryTarget?: (element: HTMLElement | null) => void;
 }) {
   const multi = d.capabilities.multiSelection;
   const base: { fieldId: string; label?: LocalizedText }[] = d.presentation?.filters ?? d.fields.filter(f => f.role === 'dimension' && f.filters.includes('in') && f.id !== d.presentation?.primaryFilterFieldId).map(f => ({ fieldId: f.id }));
   const fields = multi ? [{ fieldId: multi.fieldId }, ...base.filter(f => f.fieldId !== multi.fieldId)] : base;
   return <div className="rds-sb-quick-filters">{fields.map(item => {
     const field = d.fields.find(f => f.id === item.fieldId);
-    return field && field.availability !== 'unavailable' && provider.facet ? <QuickFacet key={field.id} descriptor={d} selection={selection} provider={provider} field={field} label={item.label ? localize(item.label, locale) : localize(field.label, locale)} filters={filters} onChange={onChange} locale={locale} t={t} open={expanded === field.id} onOpen={onExpand} disabled={disabled} /> : null;
+    return field && field.availability !== 'unavailable' && provider.facet ? <QuickFacet key={field.id} descriptor={d} selection={selection} provider={provider} field={field} label={item.label ? localize(item.label, locale) : localize(field.label, locale)} filters={filters} onChange={onChange} locale={locale} t={t} open={expanded === field.id} onOpen={onExpand} disabled={disabled} targetRef={multi && field.id === multi.fieldId ? primaryTarget : undefined} /> : null;
   })}</div>;
 }
 
-function QuickFacet({ descriptor, selection, provider, field, label, filters, onChange, locale, t, open, onOpen, disabled }: {
+function QuickFacet({ descriptor, selection, provider, field, label, filters, onChange, locale, t, open, onOpen, disabled, targetRef }: {
   descriptor: DatasetDescriptor; selection: ResolvedSelection; provider: SandboxDataProvider; field: FieldDescriptor; label: string; filters: Filter[];
-  onChange: (filters: Filter[]) => void; locale: string; t: Translate; open: boolean; onOpen: (fieldId: string | null) => void; disabled: boolean;
+  onChange: (filters: Filter[]) => void; locale: string; t: Translate; open: boolean; onOpen: (fieldId: string | null) => void; disabled: boolean; targetRef?: (element: HTMLElement | null) => void;
 }) {
   const uid = useId();
   const [search, setSearch] = useState('');
@@ -64,7 +64,7 @@ function QuickFacet({ descriptor, selection, provider, field, label, filters, on
   const choices = [...chosen.filter(value => !options.page?.values.some(item => item.value === value)).map(value => ({ value, label: options.known.get(JSON.stringify(value)) ?? fieldValueLabel(field, value, locale), count: undefined })), ...(options.page?.values ?? [])];
   const setChosen = (values: Exclude<Scalar, null>[]) => onChange([...filters.filter(f => f.fieldId !== field.id), ...(values.length ? [{ fieldId: field.id, op: 'in' as const, values }] : [])]);
   const selectedLabels = chosen.map(value => field.labelField && !options.known.has(JSON.stringify(value)) ? '' : fieldValueLabel(field, value, locale, options.known.get(JSON.stringify(value))));
-  return <details className="rds-sb-quick-filter" open={open} onToggle={e => {
+  return <details ref={targetRef} className="rds-sb-quick-filter" open={open} onToggle={e => {
     if (e.currentTarget.open && !open) onOpen(field.id);
     if (!e.currentTarget.open && open) onOpen(null);
   }}>

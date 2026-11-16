@@ -12,9 +12,14 @@ type Props = {
   t: Translate;
   onSelect: (year: number) => void;
   onImport: () => void;
+  suggestedYear?: number;
+  suggestedYearLabel?: string;
+  tutorialYearFallback?: boolean;
+  pending?: boolean;
+  onSelectSuggested?: (year: number) => void;
 };
 
-export function SyncYearPicker({ years, importedYears, localLoaded, year, disabled, imported, t, onSelect, onImport }: Props) {
+export function SyncYearPicker({ years, importedYears, localLoaded, year, disabled, imported, t, onSelect, onImport, suggestedYear, suggestedYearLabel, tutorialYearFallback, pending, onSelectSuggested }: Props) {
   const id = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +115,7 @@ export function SyncYearPicker({ years, importedYears, localLoaded, year, disabl
         <button
           type="button"
           className="sync-year-trigger"
+          data-tutorial-target={tutorialYearFallback ? 'f1-sync-year' : undefined}
           aria-labelledby={`${id}-label ${id}-selected`}
           aria-haspopup="listbox"
           aria-expanded={open}
@@ -157,7 +163,8 @@ export function SyncYearPicker({ years, importedYears, localLoaded, year, disabl
       </div>
       {!valid && <span className="sr-only" id={`${id}-invalid`}>{t('selectYear')}</span>}
     </div>
-    <button type="button" onClick={onImport} disabled={disabled || !localLoaded || !valid}>{t(imported ? 'updateSeason' : 'importSeason')}</button>
+    {suggestedYear !== undefined && years.includes(suggestedYear) && onSelectSuggested && <button type="button" data-tutorial-target="f1-sync-year" disabled={disabled} onClick={() => onSelectSuggested(suggestedYear)}>{suggestedYearLabel ?? t('season')} {suggestedYear}</button>}
+    <button type="button" data-tutorial-target="f1-sync-run" data-tutorial-pending={pending ? 'true' : undefined} onClick={onImport} disabled={disabled || !localLoaded || !valid}>{t(imported ? 'updateSeason' : 'importSeason')}</button>
     <label className="sync-only-missing" htmlFor={`${id}-missing`}>
       <input
         id={`${id}-missing`}

@@ -2,6 +2,27 @@
 
 ## Interface
 
+### Tutorial de primeiro acesso
+
+No primeiro acesso, um tutorial opcional apresenta a tela inicial, categorias,
+sincronização, snapshots, fonte dos dados, exploração e os principais controles
+do Sandbox. Popups apontam para os controles enquanto o restante da tela fica
+escurecido. “Pular tutorial” encerra o guia; a conclusão ou dispensa fica salva
+localmente, separada dos modelos.
+
+O menu **Ajuda → Como usar o sistema**, à esquerda do idioma no cabeçalho,
+reinicia o guia na tela inicial. Alterações não salvas exigem confirmação antes
+do reinício. Quando já existem snapshots, nenhuma nova sincronização é exigida.
+Sem dados, o guia sugere a temporada do ano anterior: a seleção e a importação
+dependem de ações explícitas, e o guia só avança após o sucesso. Uma falha permite
+repetir a operação ou sair. No navegador ou com controles indisponíveis, o guia
+oferece explicações sem executar operações nativas.
+
+Os textos acompanham o idioma escolhido. O teclado permite acessar os controles
+do popup, focar o recurso destacado e sair com Escape. O guia não altera modelos,
+filtros ou snapshots automaticamente. O script de reset também remove a marca
+local de conclusão/dispensa do tutorial.
+
 - Todas as abas da Fórmula 1 usam a mesma largura, tipografia e posição do menu
   anteriormente adotadas pela sandbox. O título e a área de descrição não mudam
   a altura da navegação ao trocar de aba.

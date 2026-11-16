@@ -190,6 +190,45 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 .confirm-dialog>div { display:flex; justify-content:flex-end; gap:10px; }
 .confirm-dialog .danger { background:#c91e3c; }
 .shell-error { position:fixed; z-index:5; right:16px; bottom:90px; max-width:min(420px,calc(100vw - 32px)); padding:12px; border:1px solid #ff5470; border-radius:8px; background:#2b1820; color:white; }
+.tutorial-menu { flex:none; color:#f6f7f9; background:transparent; border:1px solid #536071; border-radius:8px; padding:9px 12px; font:inherit; font-size:13px; cursor:pointer; }
+.tutorial-menu:hover { background:#252c38; }
+.tutorial-menu { position:relative; }
+.header-actions { display:flex; align-items:center; gap:16px; margin-left:auto; }
+.tutorial-menu summary { cursor:pointer; display:flex; align-items:center; justify-content:center; list-style:none; }
+.tutorial-menu summary::-webkit-details-marker { display:none; }
+.tutorial-menu summary svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+.tutorial-menu-options { position:absolute; z-index:20; top:calc(100% + 8px); right:0; width:max-content; max-width:calc(100vw - 24px); padding:8px; border:1px solid #536071; border-radius:8px; background:#1b1f28; box-shadow:0 6px 20px #0008; }
+.tutorial-menu-options button { border:0; border-radius:5px; padding:10px 12px; color:#f6f7f9; background:transparent; font:inherit; cursor:pointer; }
+.tutorial-menu-options button:hover,.tutorial-menu-options button:focus-visible { background:#30394a; }
+.tutorial-layer { position:fixed; inset:0; z-index:1000; pointer-events:none; }
+.tutorial-shield { position:fixed; z-index:1000; background:rgba(0,0,0,.72); pointer-events:auto; }
+.tutorial-spotlight { position:fixed; z-index:1000; border:2px solid #ff3152; border-radius:8px; box-shadow:0 0 24px rgba(255,49,82,.42); pointer-events:none; transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease; }
+.tutorial-card { position:fixed; z-index:1002; width:min(348px,calc(100vw - 24px)); max-height:calc(100dvh - 16px); overflow:auto; padding:16px; border:1px solid #66758d; border-radius:12px; background:#171d28; box-shadow:0 14px 42px #000b; color:#f6f7f9; pointer-events:auto; }
+.tutorial-arrow-top::before,.tutorial-arrow-bottom::before { content:""; position:absolute; left:22px; width:14px; height:14px; transform:rotate(45deg); border-left:1px solid #66758d; border-top:1px solid #66758d; background:#171d28; }
+.tutorial-arrow-top::before { top:-8px; }
+.tutorial-arrow-bottom::before { bottom:-8px; transform:rotate(225deg); }
+.tutorial-card-head { display:flex; align-items:center; justify-content:space-between; color:#bbc5d5; font-size:12px; }
+.tutorial-card h2 { margin:11px 0 6px; font-size:18px; line-height:1.3; }
+.tutorial-card h2:focus { outline:0; }
+.tutorial-card p { margin:0; color:#d0d7e3; font-size:14px; line-height:1.5; }
+.tutorial-card .tutorial-target-missing { margin-top:9px; color:#ffd6dd; }
+.tutorial-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:15px; }
+.tutorial-actions button,.tutorial-skip-fixed { padding:8px 12px; border:1px solid #f11b3e; border-radius:7px; background:#f11b3e; color:white; font:inherit; cursor:pointer; }
+.tutorial-actions .tutorial-secondary { background:transparent; border-color:#536071; }
+.tutorial-actions button:disabled { opacity:.45; cursor:not-allowed; }
+.tutorial-skip-fixed { position:fixed; z-index:1003; top:104px; right:18px; pointer-events:auto; box-shadow:0 4px 16px #0008; }
+.restart-dialog>div { display:flex; justify-content:space-between; gap:12px; }
+@media (max-width:760px) {
+  .masthead { gap:4px; padding:0 10px; }
+  .brand-image { width:78px; }
+  .tutorial-menu { padding:6px 5px; font-size:10px; white-space:nowrap; }
+  .select-wrap select { max-width:95px; padding-left:7px; padding-right:24px; font-size:10px; }
+  .tutorial-skip-fixed { top:84px; right:10px; }
+  .tutorial-card { max-height:min(70dvh,calc(100vh - 120px)); overflow:auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-spotlight { transition:none; }
+}
 @media (max-width:900px) { .snapshot-list li { grid-template-columns:minmax(0,1fr); gap:10px; } .snapshot-actions { justify-content:flex-start; flex-wrap:wrap; } }
 @media (max-width:760px) { .content:has(.f1-screen) { width:calc(100% - 24px); } .f1-screen>h1 { font-size:22px; } }
 @media (max-width:900px) { .sync-year-picker { row-gap:12px; } }

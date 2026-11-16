@@ -9,6 +9,7 @@ import { nextTabIndex } from './tabs';
 import { snapshotErrorMessageKey } from './snapshot-errors';
 import { SnapshotActions } from './snapshot-actions';
 import { SyncYearPicker } from './sync-year-picker';
+import { afterYearSelection, afterSyncResult, type TutorialBridge } from '../../onboarding';
 
 type LocalSeason = { year: number; importedAt: string | null; dataAt: string | null };
 type Progress = { year: number; phase: string; offset: number };
@@ -17,7 +18,7 @@ type View = 'sandbox' | 'explore' | 'sync' | 'snapshots' | 'source';
 const views: View[] = ['sandbox', 'explore', 'sync', 'snapshots', 'source'];
 const AnalysisScreen = lazy(() => import('./analysis-screen'));
 
-function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
+function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutorial?: TutorialBridge }) {
   const desktop = isTauri();
   const current = new Date().getFullYear();
   const fallback = Array.from({ length: Math.max(0, Math.min(current, 2100) - 1949) }, (_, i) => 1950 + i);
@@ -50,6 +51,7 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
   const active = working || progress !== null;
   const options = Array.from(new Set([...years, ...local.map((item) => item.year)])).filter((y) => y >= 1950 && y <= 2100).sort((a, b) => b - a);
   const importedYears = localLoaded ? local.filter((item) => item.importedAt).map((item) => item.year) : null;
+  const hasLocalSnapshots = local.some((item) => item.importedAt);
 
   useEffect(() => {
     const dialog = deleteDialog.current;
@@ -71,6 +73,12 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
     void load();
     return () => { alive = false; };
   }, [desktop, revision]);
+  useEffect(() => {
+    tutorial?.onLocalSnapshotsChange?.(localLoaded && hasLocalSnapshots);
+  }, [localLoaded, hasLocalSnapshots, tutorial?.onLocalSnapshotsChange]);
+  useEffect(() => {
+    if (localLoaded && hasLocalSnapshots && tutorial?.step === 'sync-year') tutorial.onStep('snapshot-content');
+  }, [localLoaded, hasLocalSnapshots, tutorial?.step]);
   useEffect(() => {
     if (!desktop || view !== 'snapshots') return;
     let alive = true;
@@ -95,7 +103,7 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
 
   async function sync() {
     setWorking(true); setError(''); setErrorKind('sync');
-    try { await invoke('f1_sync', { year }); setView('explore'); }
+    try { await invoke('f1_sync', { year }); const next = afterSyncResult(true); if (tutorial?.step === 'sync-run' && next) tutorial.onStep(next); }
     catch (e: unknown) { setError(String(e)); }
     finally { setWorking(false); setProgress(null); setRevision((n) => n + 1); }
   }
@@ -140,11 +148,19 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
     initialView.current = true;
     setView(item); setError(''); setCopied(null); setSnapshotError(null); setRenaming(null); setSnapshotName('');
   }
+  function activateTab(item: View) {
+    selectTab(item);
+    if (item === 'sync' && tutorial?.step === 'sync-tab') tutorial.onStep('sync-content');
+    else if (item === 'snapshots' && tutorial?.step === 'snapshots-tab') tutorial.onStep('snapshots-content');
+    else if (item === 'source' && tutorial?.step === 'source-tab') tutorial.onStep('source-content');
+    else if (item === 'explore' && tutorial?.step === 'explore-tab') tutorial.onStep('explore-content');
+    else if (item === 'sandbox' && tutorial?.step === 'sandbox-tab') tutorial.onStep('models');
+  }
   function navigateTabs(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     const target = nextTabIndex(event.key, index, views.length);
     if (target === null) return;
     event.preventDefault();
-    selectTab(views[target]);
+    activateTab(views[target]);
     tabRefs.current[target]?.focus();
   }
   const phase = progress?.phase === 'races' ? t('phaseRaces') : progress?.phase === 'results' ? t('phaseResults') : progress?.phase === 'sprint' ? t('phaseSprint') : progress?.phase === 'saving' ? t('phaseSaving') : t('phaseStarting');
@@ -155,19 +171,25 @@ function F1Screen({ t, locale }: { t: Translate; locale: Locale }) {
     {!desktop && <p role="status">{t('desktopOnly')}</p>}
     {desktop && <>
       <div className="f1-tab-scroll"><div className="f1-nav" role="tablist" aria-label={t('f1Tabs')}>
-        {views.map((item, index) => <button key={item} ref={(node) => { tabRefs.current[index] = node; }} id={`f1-tab-${item}`} type="button" role="tab" aria-selected={view === item} aria-controls="f1-tabpanel" tabIndex={view === item || (view === null && index === 0) ? 0 : -1} onKeyDown={(event) => navigateTabs(event, index)} onClick={() => selectTab(item)}>{t(item === 'sandbox' ? 'sandbox' : item === 'explore' ? 'explore' : item === 'sync' ? 'manageSync' : item === 'snapshots' ? 'manageSnapshots' : 'dataSource')}</button>)}
+        {views.map((item, index) => <button key={item} ref={(node) => { tabRefs.current[index] = node; }} id={`f1-tab-${item}`} data-tutorial-target={`f1-${item === 'sandbox' ? 'sandbox' : item === 'explore' ? 'explore' : item === 'sync' ? 'sync' : item === 'source' ? 'source' : 'snapshots'}-tab`} type="button" role="tab" aria-selected={view === item} aria-controls="f1-tabpanel" tabIndex={view === item || (view === null && index === 0) ? 0 : -1} onKeyDown={(event) => navigateTabs(event, index)} onClick={() => activateTab(item)}>{t(item === 'sandbox' ? 'sandbox' : item === 'explore' ? 'explore' : item === 'sync' ? 'manageSync' : item === 'snapshots' ? 'manageSnapshots' : 'dataSource')}</button>)}
       </div></div>
       {view && <div id="f1-tabpanel" role="tabpanel" tabIndex={0} aria-labelledby={`f1-tab-${view}`}>
-      {view === 'sandbox' && <section className="f1-sandbox"><Suspense fallback={<p role="status">{t('loading')}</p>}><AnalysisScreen locale={locale} /></Suspense></section>}
-      {view === 'source' && <section><h2>{t('dataSource')}</h2><p>{t('sourceNotice')}</p><p><a href="https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md" target="_blank" rel="noreferrer">{t('sourceTerms')}</a> · <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noreferrer">CC BY-NC-SA 4.0</a></p></section>}
+        {view === 'sandbox' && <section className="f1-sandbox"><Suspense fallback={<p role="status">{t('loading')}</p>}><AnalysisScreen locale={locale} tutorial={tutorial} /></Suspense></section>}
+       {view === 'source' && <section><h2>{t('dataSource')}</h2><p>{t('sourceNotice')}</p><p>{locale === 'pt-BR' ? 'Os dados são solicitados diretamente à Jolpica F1, sucessora da Ergast, e armazenados localmente neste dispositivo; não são enviados a servidores do Racing Data Studio.' : 'Data is requested directly from Jolpica F1, Ergast’s successor, and stored locally on this device; it is not sent to Racing Data Studio servers.'}</p><p><a href="https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md" target="_blank" rel="noreferrer">{t('sourceTerms')}</a> · <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noreferrer">CC BY-NC-SA 4.0</a></p></section>}
        {view === 'sync' && <><p>{t('futureNotice')}</p>
        {catalogState === 'loading' && <p role="status">{t('catalog')}</p>}
        {catalogState === 'fallback' && <p role="status">{t('fallbackNotice')}</p>}</>}
        {view !== 'source' && view !== 'sandbox' && <>
        <div className="season-controls">
          {view === 'sync'
-           ? <SyncYearPicker years={options} importedYears={importedYears} localLoaded={localLoaded} year={year} disabled={active} imported={imported} t={t} onImport={() => void sync()} onSelect={(selectedYear) => {
-               if (selectedYear === year) return;
+              ? <SyncYearPicker years={options} importedYears={importedYears} localLoaded={localLoaded} year={year} disabled={active} pending={active} imported={imported} t={t} suggestedYear={tutorial?.step === 'sync-year' && options.includes(current - 1) ? current - 1 : undefined} suggestedYearLabel={locale === 'pt-BR' ? 'Selecionar ano sugerido' : 'Select suggested year'} tutorialYearFallback={tutorial?.step === 'sync-year' && !options.includes(current - 1)} onSelectSuggested={(selectedYear) => {
+                 setDetails(null); setSnapshots([]); setYear(selectedYear); tutorial?.onStep('sync-run');
+               }} onImport={() => void sync()} onSelect={(selectedYear) => {
+                 if (tutorial?.step === 'sync-year') {
+                   const next = afterYearSelection(selectedYear, current - 1, options.includes(current - 1));
+                   if (next) tutorial.onStep(next);
+                 }
+                if (selectedYear === year) return;
                setDetails(null); setSnapshots([]); setCopied(null); setSnapshotError(null); setRenaming(null); setSnapshotName(''); setYear(selectedYear);
              }} />
            : <><label htmlFor="season-year">{t('season')}</label>
