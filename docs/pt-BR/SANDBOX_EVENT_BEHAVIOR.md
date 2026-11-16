@@ -1,6 +1,6 @@
 # Comportamento dos gráficos: acumulados e eventos
 
-## Estado na beta
+## Comportamento atual
 
 Acumulados por piloto, unificação de eventos e legendas continuam disponíveis. O preenchimento de lacunas é condicionado à integridade e cronologia; os resultados de teste abaixo são históricos, não validação atual.
 

@@ -1,6 +1,6 @@
-# Guia para testar a beta
+# Beta aberta: testes e contribuições
 
-Esta é uma versão preliminar: pode ter erros, perder dados ou mudar de comportamento. Não é estável, certificada ou recomendada para produção. Confira [Releases](https://github.com/GustavoCarisRezende/racing-data-studio/releases) para saber se existe uma versão disponível; não presumimos que já haja instaladores publicados. Os testes feitos priorizam Linux; Windows e macOS ainda precisam de validação.
+A beta aberta convida a comunidade a testar o aplicativo e contribuir com os polimentos finais. Confira [Releases](https://github.com/GustavoCarisRezende/racing-data-studio/releases) para saber se existe uma versão disponível; não presumimos que já haja instaladores publicados. Os testes feitos priorizam Linux; Windows e macOS ainda precisam de validação.
 
 Se não houver um arquivo adequado para seu sistema, executar a partir do código exige ferramentas de desenvolvimento: clone `https://github.com/GustavoCarisRezende/racing-data-studio.git` com Git, entre na pasta `racing-data-studio` e siga os pré-requisitos e comandos de [desenvolvimento](DEVELOPMENT.md#pré-requisitos-e-comandos). Não é necessário criar conta para usar o aplicativo; uma conta GitHub é necessária para abrir uma issue. A prévia no navegador não substitui o aplicativo desktop.
 
@@ -16,11 +16,11 @@ Para orientações completas, exemplos e solução de problemas, consulte o [gui
 
 Uma atualização bem-sucedida cria e ativa um novo snapshot, mesmo com conteúdo idêntico. Importar e atualizar exigem rede; exploração dos dados já importados é local. Os pontos e acumulados são exploratórios, não classificação oficial. A fonte pode ter dados incompletos, inclusive quando a importação termina sem erro.
 
-## Proteja seus dados
+## Dados locais e reset
 
-**Snapshot não é backup:** ele fica no mesmo banco local. Faça cópias independentes do diretório de dados do aplicativo, com o aplicativo fechado, antes de atualizar, restaurar ou testar uma versão diferente. No Linux, o banco normalmente fica em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite` ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`. Cópias por evento são suplementares, não restauram o banco e não o substituem.
+Snapshots ficam no mesmo banco local e não são cópias externas independentes. No Linux, o banco normalmente fica em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite` ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`. Cópias por evento são suplementares e não restauram o banco.
 
-A opção **Restaurar Configurações Padrão** do menu pede confirmação e reinicia o aplicativo; ela apaga permanentemente dados locais, snapshots, modelos e preferências nas áreas do aplicativo. Cancelar não apaga. Exportações em outros locais não são apagadas. Não confirme sem backup. Para detalhes técnicos e diferenças de desenvolvimento, veja [usabilidade e reset](DESKTOP_USABILITY.md).
+A opção **Restaurar Configurações Padrão** do menu pede confirmação e reinicia o aplicativo; ela apaga permanentemente dados locais, snapshots, modelos e preferências nas áreas do aplicativo. Cancelar não apaga. Exportações em outros locais não são apagadas. Para detalhes técnicos e diferenças de desenvolvimento, veja [usabilidade e reset](DESKTOP_USABILITY.md).
 
 ## Como contribuir sem programar
 
@@ -29,4 +29,4 @@ A opção **Restaurar Configurações Padrão** do menu pede confirmação e rei
 3. Abra uma [nova issue](https://github.com/GustavoCarisRezende/racing-data-studio/issues/new), dê um título claro e cole as informações. Pode sugerir uma etiqueta adequada, sem presumir que exista no repositório.
 4. Relate um problema por issue quando possível. Informe versão, sistema e passos reproduzíveis; capturas ou logs ajudam, mas remova dados pessoais, caminhos privados e informações sensíveis. **Não envie seu banco de dados ou dados pessoais.**
 
-Sugestões e correções são bem-vindas, mas não há garantia de aceitação nem prazo de resposta. O código está sob [Apache-2.0](../LICENSE); dados da [Jolpica F1](https://github.com/jolpica/jolpica-f1) têm termos próprios, incluindo CC BY-NC-SA 4.0 e uso não comercial. Consulte os termos atuais antes de redistribuir dados.
+Sugestões e correções são bem-vindas, mas não há garantia de aceitação nem prazo de resposta. O código está sob [Apache-2.0](../../LICENSE); dados da [Jolpica F1](https://github.com/jolpica/jolpica-f1) têm termos próprios, incluindo CC BY-NC-SA 4.0 e uso não comercial. Consulte os termos atuais antes de redistribuir dados.

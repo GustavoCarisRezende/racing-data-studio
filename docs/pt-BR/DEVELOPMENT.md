@@ -1,10 +1,10 @@
-# Desenvolvimento e arquitetura da beta
+# Desenvolvimento e arquitetura
 
-Esta documentação descreve o código atual. A versão atual do código é `0.1.0`; o canal é beta. Os artefatos anunciados em Releases definem a disponibilidade. Linux recebeu testes; Windows e macOS, seus instaladores e o uso completo em Wayland nativo ainda precisam de validação.
+Esta documentação descreve o código atual. A versão atual do código é `0.1.0`. Os artefatos anunciados em Releases definem a disponibilidade. Linux recebeu testes; Windows e macOS, seus instaladores e o uso completo em Wayland nativo ainda precisam de validação.
 
 ## Arquitetura e dados
 
-`app/` contém React/TypeScript/Vite e o shell Tauri 2/Rust. O registro em `app/src/categories/` isola categorias; F1 é a única funcional. `app/src-tauri/src/f1/` é dono de rede, repositório e regras F1. `packages/` fornece contratos, núcleo, UI React e renderer ECharts independentes da categoria; o host injeta provider, store e serviços. Veja [contrato v1](SANDBOX_INTEGRATION.md), [handoff v2](SANDBOX_V2_HANDOFF.md), [v3](SANDBOX_V3_ACCUMULATION.md) e [pacotes](../packages/README.md). Os contratos de protocolo, documento, transformação e esquema são versionados separadamente; documentos incompatíveis não devem ser reinterpretados silenciosamente.
+`app/` contém React/TypeScript/Vite e o shell Tauri 2/Rust. O registro em `app/src/categories/` isola categorias; F1 é a única funcional. `app/src-tauri/src/f1/` é dono de rede, repositório e regras F1. `packages/` fornece contratos, núcleo, UI React e renderer ECharts independentes da categoria; o host injeta provider, store e serviços. Veja [contrato v1](SANDBOX_INTEGRATION.md), [handoff v2](SANDBOX_V2_HANDOFF.md), [v3](SANDBOX_V3_ACCUMULATION.md) e [pacotes](packages/README.md). Os contratos de protocolo, documento, transformação e esquema são versionados separadamente; documentos incompatíveis não devem ser reinterpretados silenciosamente.
 
 ### Mapa do código
 
@@ -42,7 +42,7 @@ A sincronização paginada valida origem, páginas e cobertura detectável contr
 
 ### Migrations e tabelas
 
-`repository.rs` executa as migrations pendentes em uma transação `IMMEDIATE`, atualizando `PRAGMA user_version`; erro provoca rollback. A versão 10 é a máxima suportada. Faça backup separado com o app fechado antes de trocar de versão: não há downgrade automático garantido.
+`repository.rs` executa as migrations pendentes em uma transação `IMMEDIATE`, atualizando `PRAGMA user_version`; erro provoca rollback. A versão 10 é a máxima suportada. Não há downgrade automático garantido.
 
 | Versão / arquivo em `app/src-tauri/src/f1/migrations/` | Efeito |
 |---|---|
@@ -126,13 +126,13 @@ A disponibilidade de cgroups/systemd varia. Suítes não substituem teste visual
 | Unitária e contratos | Validação, decimais, filtros, versões e conflitos em `packages/tests/`; lógica Rust em testes de módulo | Fixtures não provam IPC ou apresentação nativa. |
 | Integração | Adapter F1 com readers sintéticos, migrações/repositório em banco temporário, build dos workspaces | Isolar dados e não presumir acesso à rede ou dados reais. |
 | UI | jsdom e testes da aplicação; inspeção visual com dados simulados | jsdom não valida layout, leitor de tela ou CSP real. |
-| Desktop nativo | Importar, reabrir offline, ativar/restaurar, exportar/cancelar, tutorial e reset em perfil XDG isolado | Usar dados descartáveis, diretórios separados e backup; Linux testado parcialmente, outras plataformas pendentes. |
+| Desktop nativo | Importar, reabrir offline, ativar/restaurar, exportar/cancelar, tutorial e reset em perfil XDG isolado | Usar dados descartáveis e diretórios separados; Linux testado parcialmente, outras plataformas pendentes. |
 
-### Checklist antes de disponibilizar uma beta
+### Checklist antes de disponibilizar uma versão
 
 - [ ] Confirmar versão/canal e notas de mudanças, sem renomear versões declaradas sem decisão de release.
 - [ ] Executar testes isolados, builds e validação nativa para cada plataforma anunciada; registrar escopo e pendências.
-- [ ] Verificar migrations, atualização, rollback operacional por backup, recuperação, reset e ausência de dados pessoais no artefato.
+- [ ] Verificar migrations, atualização, recuperação, reset e ausência de dados pessoais no artefato.
 - [ ] Revisar dependências, lockfiles, auditorias, licenças, avisos, atribuição Jolpica e SBOM do produto.
 - [ ] Verificar CSP/capabilities, limites de exportação, acessibilidade, privacidade e condições da fonte.
 - [ ] Decidir e validar empacotamento, assinaturas e distribuição; conferir artefatos e instruções apenas quando existirem.
@@ -140,12 +140,12 @@ A disponibilidade de cgroups/systemd varia. Suítes não substituem teste visual
 
 ## Reset e recuperação de desenvolvimento
 
-O comando nativo `reset_application` é autorizado pela capability da janela `main`. A confirmação prepara reset e reinício; na próxima inicialização a limpeza ocorre antes de banco e WebView. Em Linux, as raízes de dados, configuração, cache e estado do aplicativo são afetadas; exportações fora delas não são removidas. É irreversível: feche e faça backup independente antes. O binário não executa nem requer Python para esse reset. O script opcional `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux: sem `--yes` mostra os destinos; consulte [detalhes e proteção de caminhos](DESKTOP_USABILITY.md).
+O comando nativo `reset_application` é autorizado pela capability da janela `main`. A confirmação prepara reset e reinício; na próxima inicialização a limpeza ocorre antes de banco e WebView. Em Linux, as raízes de dados, configuração, cache e estado do aplicativo são afetadas; exportações fora delas não são removidas. A operação é irreversível. O binário não executa nem requer Python para esse reset. O script opcional `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux: sem `--yes` mostra os destinos; consulte [detalhes e proteção de caminhos](DESKTOP_USABILITY.md).
 
 Em desenvolvimento, após o reset o processo reaberto usa a cópia local `app/dist` via protocolo interno, pois o CLI pode encerrar o servidor Vite. A cópia é validada antes do reset; se inválida ou ausente, a operação é recusada. Essa instância de recuperação não tem HMR: encerre-a e volte a executar `npm run tauri dev` para retomar HMR. O início normal usa Vite. Testes de reset devem usar raízes XDG isoladas; não executar contra dados reais.
 
 ## Segurança, licença e limites
 
-A capability limita comandos à janela local `main`; a CSP não concede rede Jolpica diretamente ao WebView. Rust usa HTTPS com URL fixa, paginação e limites/tentativas; cotas são compartilhadas por IP e podem mudar. O seletor nativo escolhe destino de exportação; não há permissão genérica de filesystem ao frontend. Exportações não sobrescrevem silenciosamente e têm limites de tamanho. Consulte [segurança dos pacotes](../packages/SECURITY.md) e [pizza/exportação](SANDBOX_PIE_EXPORT.md).
+A capability limita comandos à janela local `main`; a CSP não concede rede Jolpica diretamente ao WebView. Rust usa HTTPS com URL fixa, paginação e limites/tentativas; cotas são compartilhadas por IP e podem mudar. O seletor nativo escolhe destino de exportação; não há permissão genérica de filesystem ao frontend. Exportações não sobrescrevem silenciosamente e têm limites de tamanho. Consulte [segurança dos pacotes](packages/SECURITY.md) e [pizza/exportação](SANDBOX_PIE_EXPORT.md).
 
-Código [Apache-2.0](../LICENSE); dados [Jolpica F1](https://github.com/jolpica/jolpica-f1) sob termos próprios, incluindo CC BY-NC-SA 4.0 e uso não comercial. Verifique licença, atribuição e termos atuais antes de distribuir. Não é aconselhamento jurídico nem afiliação à Fórmula 1.
+Código [Apache-2.0](../../LICENSE); dados [Jolpica F1](https://github.com/jolpica/jolpica-f1) sob termos próprios, incluindo CC BY-NC-SA 4.0 e uso não comercial. Verifique licença, atribuição e termos atuais antes de distribuir. Não é aconselhamento jurídico nem afiliação à Fórmula 1.

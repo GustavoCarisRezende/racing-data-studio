@@ -1,6 +1,6 @@
 # Sandbox biblioteca — handoff v2 (10/11/2026)
 
-> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o estado beta e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e [guia beta](BETA.md). O texto histórico abaixo foi preservado.
+> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o comportamento atual e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e o [guia de uso](USER_GUIDE.md). O texto histórico abaixo foi preservado.
 
 > Para incluir sessões anteriores apesar do recorte por sessão/rodada, usar o
 > opt-in [v3 por perfil](SANDBOX_V3_ACCUMULATION.md). Este documento conserva o

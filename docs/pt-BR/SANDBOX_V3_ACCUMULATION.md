@@ -1,6 +1,6 @@
 # Handoff: acumulados por perfil — query/modelo v3
 
-> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o estado beta e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e [guia beta](BETA.md). O texto histórico abaixo foi preservado.
+> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o comportamento atual e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e o [guia de uso](USER_GUIDE.md). O texto histórico abaixo foi preservado.
 
 > A apresentação atual usa o perfil como **métrica selecionável**, não como seletor
 > técnico de perfil. Contrato/pipeline v3 abaixo preservados. Ver

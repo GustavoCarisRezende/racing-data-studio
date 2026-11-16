@@ -1,6 +1,6 @@
 # Agregações de pontos F1
 
-## Estado na beta
+## Comportamento atual
 
 Pontos oferecem soma, média, mínimo e máximo com propagação de nulos e decimais exatos. A descrição de teste pendente registra a época da alteração; consulte testes atuais antes de concluir cobertura.
 
@@ -18,7 +18,7 @@ continuam usando aproximações numéricas para desenhar.
 Consultas e documentos existentes não são regravados. O armazenamento nativo foi
 estendido para aceitar as novas opções nos formatos atuais, mas versões antigas do
 aplicativo F1 podem rejeitar modelos que usem essas opções, inclusive ao listar
-modelos; não se deve compartilhar esse banco com uma versão anterior sem backup.
+modelos.
 O comportamento nativo das agregações ainda precisa de teste de integração Rust
 isolado.
 

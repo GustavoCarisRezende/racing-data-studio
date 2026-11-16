@@ -1,6 +1,6 @@
 # Pizza e exportação
 
-## Estado na beta
+## Comportamento atual
 
 Pizza, CSV e SVG/PNG estão disponíveis quando compatíveis. O host atual exporta um CSV ou uma imagem, sem manifesto e sem JPEG; as seções históricas abaixo descrevem um fluxo anterior.
 
@@ -26,8 +26,7 @@ As preferências também ficam preservadas ao mudar para outro tipo de gráfico.
 
 O store nativo valida o novo campo; modelos existentes não são regravados apenas
 ao abrir. **Versões anteriores do aplicativo não entendem o campo e podem falhar
-ao listar modelos novos que o contenham**. Não compartilhe o banco com versões
-anteriores sem backup; não há conversão ou downgrade automático.
+ao listar modelos novos que o contenham**. Não há conversão ou downgrade automático.
 
 ## CSV experimental no host F1
 

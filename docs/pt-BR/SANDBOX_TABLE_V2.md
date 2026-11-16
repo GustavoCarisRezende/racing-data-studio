@@ -1,6 +1,6 @@
 # Tabela: ordenação, agrupamento e rodadas
 
-## Estado na beta
+## Comportamento atual
 
 Ordenação multicoluna e resumo por nova consulta permanecem recursos atuais; resumo não soma linhas agregadas e pode modificar a semântica dos filtros. Confira o contrato v3 para perfis.
 
@@ -25,8 +25,8 @@ resultantes são persistidas no documento v2/v3 existente, sem conversão autom�
 Recortes antes aplicados após acumulados passam a filtrar antes da nova agregação.
 
 O store nativo aceita e valida as duas versões. **Versões anteriores do aplicativo
-não entendem tabela v2 e podem falhar ao listar modelos que a utilizem.** Não
-compartilhe o banco com uma versão antiga sem backup; não há downgrade automático.
+não entendem tabela v2 e podem falhar ao listar modelos que a utilizem.** Não há
+downgrade automático.
 As validações de compatibilidade e CAS não alteram modelos antigos ao abri-los.
 
 Na F1, o nome de evento vem do calendário da mesma revisão e temporada; ausência

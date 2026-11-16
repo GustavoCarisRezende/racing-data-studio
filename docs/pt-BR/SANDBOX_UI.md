@@ -1,6 +1,6 @@
 # Sandbox: revisão visual e funcional — 08/11/2026
 
-> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o estado beta e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e [guia beta](BETA.md). O texto histórico abaixo foi preservado.
+> **Contexto histórico:** este documento registra uma proposta, contrato ou revisão de seu período; afirmações de estado, pendências e testes não são necessariamente atuais. Para o comportamento atual e as diferenças de implementação, consulte [desenvolvimento](DEVELOPMENT.md) e o [guia de uso](USER_GUIDE.md). O texto histórico abaixo foi preservado.
 
 > UI atual de 12/11/2026: [SANDBOX_UI_RECOVERY.md](SANDBOX_UI_RECOVERY.md).
 > Este arquivo conserva o registro visual anterior, inclusive seus breakpoints.

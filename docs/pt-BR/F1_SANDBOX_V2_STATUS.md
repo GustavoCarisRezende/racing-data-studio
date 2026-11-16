@@ -1,6 +1,6 @@
 # Integração F1 da sandbox v2 — estado parcial
 
-## Estado na beta
+## Comportamento atual
 
 O adapter F1 e os perfis v3 estão integrados; modelos `latest` resolvem snapshots ativos. Referências a bloqueios e ausência de validação abaixo são registros das etapas indicadas, não necessariamente pendências atuais.
 

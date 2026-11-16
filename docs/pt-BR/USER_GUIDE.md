@@ -1,6 +1,6 @@
-# Guia de uso — Racing Data Studio beta
+# Guia de uso — Racing Data Studio
 
-Este guia apresenta as funções disponíveis no aplicativo desktop. A beta é uma versão em avaliação: recursos e interface podem mudar, e dados da fonte podem estar incompletos. Consulte o [guia beta](BETA.md) para instalação, contribuição e cuidados iniciais. A interface em navegador não substitui o aplicativo desktop para importar e analisar dados locais.
+Este guia apresenta as funções disponíveis no aplicativo desktop. Dados da fonte podem estar incompletos. Consulte o [guia de testes e contribuições](BETA.md) para instalação e participação. A interface em navegador não substitui o aplicativo desktop para importar e analisar dados locais.
 
 ## Índice
 
@@ -13,12 +13,12 @@ Este guia apresenta as funções disponíveis no aplicativo desktop. A beta é u
 7. [Modelos e análises salvas](#modelos-e-análises-salvas)
 8. [Exportar](#exportar)
 9. [Receitas rápidas](#receitas-rápidas)
-10. [Backup, reset e privacidade](#backup-reset-e-privacidade)
+10. [Dados locais, reset e privacidade](#dados-locais-reset-e-privacidade)
 11. [Problemas frequentes](#problemas-frequentes)
 
 ## Começar e navegar
 
-1. Abra o aplicativo desktop e selecione **Fórmula 1**, a categoria funcional nesta beta.
+1. Abra o aplicativo desktop e selecione **Fórmula 1**, a categoria funcional.
 2. O tutorial inicial é opcional: acompanhe os destaques ou escolha **Pular tutorial**. Para reiniciá-lo, abra o menu de três linhas à direita do seletor de idioma e escolha **Como usar o sistema**. Se houver edições não salvas, confirme antes de reiniciar o tutorial.
 3. Escolha **Português (Brasil)** ou **English (US)** no cabeçalho. A escolha atual não é mantida entre reinícios.
 4. Use as abas **Sandbox de dados**, **Explorar eventos**, **Gerenciar sincronizações**, **Gerenciar snapshots** e **Fonte dos dados**. Volte à tela inicial por **Categorias**.
@@ -51,11 +51,11 @@ Um **snapshot** é uma captura local de uma temporada. A lista apresenta captura
 | **Renomear** | Altera somente o nome exibido, não os dados nem o ID. |
 | **Restaurar** | Com confirmação, valida uma captura anterior, cria uma cópia e a torna ativa. Restaurar a já ativa pode não criar cópia. |
 | **Excluir** | Com confirmação, remove permanentemente a captura não ativa e suas páginas. A ativa é protegida contra exclusão. |
-| **Criar cópias por evento** | No Linux, cria arquivos suplementares a partir da captura selecionada; não restaura nem substitui backup do banco. |
+| **Criar cópias por evento** | No Linux, cria arquivos suplementares a partir da captura selecionada; não restaura o banco. |
 
 Nomes são aparados e aceitam até **80 caracteres**, sem caracteres de controle; devem ser únicos na temporada, sem diferenciar maiúsculas de minúsculas. O nome automático `Snapshot #<ID>` é reservado. Confirmar o próprio nome automático sem nome personalizado não altera os metadados.
 
-**Antes de excluir:** análises antigas podem depender de uma captura específica. A exclusão não verifica essas referências e pode impedir que a análise seja reaberta. Manter uma captura no mesmo banco não é backup independente.
+**Antes de excluir:** análises antigas podem depender de uma captura específica. A exclusão não verifica essas referências e pode impedir que a análise seja reaberta. Uma captura no mesmo banco não é uma cópia externa independente.
 
 ## Sandbox: filtros e visualizações
 
@@ -121,11 +121,11 @@ No diálogo de opções de exportação, **Cancelar** fica à esquerda e **Expor
 4. **Voltar a dados anteriores:** em **Gerenciar snapshots**, escolha uma captura e use **Tornar ativa**; reabra o modelo para resolver a seleção ativa. Para criar uma nova cópia ativa, use **Restaurar**.
 5. **Reutilizar e compartilhar:** ajuste filtros e visualização → dê um título e salve um modelo → exporte CSV para números ou SVG/PNG para imagem. Confira licença e privacidade antes de compartilhar.
 
-## Backup, reset e privacidade
+## Dados locais, reset e privacidade
 
-Os dados, modelos e snapshots ficam no dispositivo; importar ou atualizar usa rede. Faça **backup independente**, com o aplicativo fechado, antes de atualizar versões, excluir capturas ou redefinir dados. No Linux o banco costuma estar em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`. Um snapshot no mesmo banco e cópias por evento **não substituem backup**.
+Os dados, modelos e snapshots ficam no dispositivo; importar ou atualizar usa rede. No Linux o banco costuma estar em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`. Snapshots ficam no mesmo banco; cópias por evento são suplementares e não restauram o banco.
 
-O menu de três linhas oferece **Restaurar Configurações Padrão** no desktop. Confirmar prepara reinício e exclusão permanente de dados locais, snapshots, modelos, preferências e armazenamento local do app; cancelar não apaga. Arquivos exportados fora das pastas do aplicativo não são removidos. O reset é nativo e não exige Python. O script `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux; consulte [detalhes e precauções](DESKTOP_USABILITY.md#reset-local-exclusivo-de-desenvolvimento-linux) antes de usá-lo.
+O menu de três linhas oferece **Restaurar Configurações Padrão** no desktop. Confirmar prepara reinício e exclusão permanente de dados locais, snapshots, modelos, preferências e armazenamento local do app; cancelar não apaga. Arquivos exportados fora das pastas do aplicativo não são removidos. O reset é nativo e não exige Python. O script `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux; consulte [detalhes e precauções](DESKTOP_USABILITY.md#reset-nativo-e-limpeza-de-desenvolvimento-no-linux) antes de usá-lo.
 
 Dados Jolpica têm [termos próprios](https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md), incluindo atribuição, CC BY-NC-SA 4.0 e uso não comercial. Não envie banco pessoal, credenciais ou dados sensíveis ao relatar problemas; anonimize capturas e logs.
 
@@ -142,4 +142,4 @@ Dados Jolpica têm [termos próprios](https://github.com/jolpica/jolpica-f1/blob
 | Modelo em conflito ou análise não abre | Atualize a lista e reabra; uma análise antiga exige que suas capturas originais ainda existam. |
 | Exportação falhou | Verifique resultado completo, tamanho, permissão de escrita e nome ainda não existente; tente novamente. |
 
-Para contribuir, pesquise relatos existentes e use o [modelo de issue](models/CONTRIBUTION_TEMPLATE.md); instruções completas estão no [guia beta](BETA.md#como-contribuir-sem-programar).
+Para contribuir, pesquise relatos existentes e use o [modelo de issue](models/CONTRIBUTION_TEMPLATE.md); instruções completas estão no [guia de testes](BETA.md#como-contribuir-sem-programar).

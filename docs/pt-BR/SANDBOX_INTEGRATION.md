@@ -1,6 +1,6 @@
 # Contrato de integração da sandbox — protocolo/documento v1
 
-## Estado na beta
+## Comportamento atual
 
 O contrato v1 continua relevante para análises fixas, mas não descreve todas as extensões. O host F1 usa também v2/v3, `latest` resolve o snapshot ativo e a exportação atual não produz manifesto.
 
@@ -11,7 +11,7 @@ O contrato v1 continua relevante para análises fixas, mas não descreve todas a
 > Acumulado entre sessões com filtros múltiplos pós-cálculo: contrato opt-in
 > [SANDBOX_V3_ACCUMULATION.md](SANDBOX_V3_ACCUMULATION.md). Não muda a semântica v2.
 
-Biblioteca independente em [`packages/`](../packages/README.md), integrada pela
+Biblioteca independente em [`packages/`](packages/README.md), integrada pela
 camada `app/src/categories/f1/analysis-*`. A revisão visual de 08/11/2026 ajustou
 também a composição React e o adapter F1, sem modificar SQLite, migrations,
 sincronização ou permissões. Testes visuais usam snapshots inventados, não o banco

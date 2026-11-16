@@ -1,8 +1,8 @@
 # Usabilidade desktop e gerenciamento de snapshots
 
-## Estado na beta
+## Comportamento atual
 
-tutorial opcional, snapshots, reset nativo e recuperação de desenvolvimento estão disponíveis. Validações descritas abaixo têm escopo e data próprios; não equivalem à validação completa de todas as plataformas.
+Tutorial opcional, snapshots, reset nativo e recuperação de desenvolvimento estão disponíveis. Validações descritas abaixo têm escopo e data próprios; não equivalem à validação completa de todas as plataformas.
 
 ## Interface
 
@@ -96,7 +96,7 @@ não uma versão histórica ativada pelo usuário.
 - As verificações e a exclusão de páginas e snapshot ocorrem na mesma transação
   de escrita, sob os bloqueios cooperativos usados pela sincronização.
 - Renomear não altera IDs ou nomes de arquivos. Excluir não apaga cópias por
-  evento já publicadas, e essas cópias não substituem o backup do banco.
+  evento já publicadas; essas cópias não são cópias completas do banco.
 - Falhas de exclusão aparecem dentro do modal; conflitos de nome são mostrados
   junto ao campo de edição, sem depender de detalhes técnicos ocultos.
 
@@ -146,7 +146,7 @@ As verificações automatizadas usam dados isolados. Separadamente, por solicita
 explícita do usuário, os dados locais do aplicativo foram apagados para reiniciar
 os testes de desenvolvimento.
 
-## Reset local exclusivo de desenvolvimento (Linux)
+## Reset nativo e limpeza de desenvolvimento no Linux
 
 O menu hambúrguer também oferece **Restaurar Configurações Padrão**, em
 vermelho após um separador. No desktop, a opção abre um aviso de exclusão
