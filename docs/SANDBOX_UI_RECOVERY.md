@@ -1,5 +1,9 @@
 # Sandbox — correção funcional/visual de 12/11/2026
 
+## Estado na beta
+
+A gestão unificada de modelos e perfis selecionados como métricas continua relevante. Layout e detalhes dos controles podem ter evoluído; verifique o código e as revisões posteriores.
+
 Referência: `temp/exemplo_sandbox_dados.png`. Esta revisão corrige a biblioteca e
 dois pontos indispensáveis do host F1, sem alterar SQL, migrations, dados ou modelos
 persistidos. Alterações anteriores da integração foram preservadas. Sem commit/push.

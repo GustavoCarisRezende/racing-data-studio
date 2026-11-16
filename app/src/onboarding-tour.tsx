@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Locale } from './i18n/messages';
-import type { TutorialAction, TutorialRect, TutorialState, TutorialStep } from './onboarding';
-import { afterSyncExplanation, tutorialRect } from './onboarding';
+import type { TutorialAction, TutorialCornerRadii, TutorialRect, TutorialState, TutorialStep } from './onboarding';
+import { afterSyncExplanation, tutorialCornerRadii, tutorialCutoutPath, tutorialRect, tutorialShields } from './onboarding';
 
 type Definition = { target?: string; en: [string, string]; pt: [string, string] };
 const copy: Record<TutorialStep, Definition> = {
@@ -44,18 +44,6 @@ export const previousTutorialStep = (step: TutorialStep): TutorialStep | undefin
   ? 'sync-content'
   : ordered[ordered.indexOf(step) - 1];
 
-function shields(rect: TutorialRect | null) {
-  const w = window.innerWidth, h = window.innerHeight;
-  if (!rect) return [{ top: 0, left: 0, width: w, height: h }];
-  const x1 = rect.left, y1 = rect.top, x2 = Math.min(w, x1 + rect.width), y2 = Math.min(h, y1 + rect.height);
-  return [
-    { top: 0, left: 0, width: w, height: y1 },
-    { top: y2, left: 0, width: w, height: Math.max(0, h - y2) },
-    { top: y1, left: 0, width: x1, height: Math.max(0, y2 - y1) },
-    { top: y1, left: x2, width: Math.max(0, w - x2), height: Math.max(0, y2 - y1) },
-  ];
-}
-
 export function OnboardingTour({ state, locale, dispatch, targetElement, onMissingTarget, onBack, hasLocalSnapshots = false }: {
   state: TutorialState; locale: Locale; dispatch: (action: TutorialAction) => void;
   targetElement?: (target: string) => HTMLElement | null;
@@ -64,6 +52,7 @@ export function OnboardingTour({ state, locale, dispatch, targetElement, onMissi
   hasLocalSnapshots?: boolean;
 }) {
   const [rect, setRect] = useState<TutorialRect | null>(null);
+  const [cornerRadii, setCornerRadii] = useState<TutorialCornerRadii | null>(null);
   const [suspended, setSuspended] = useState(false);
   const [targetNode, setTargetNode] = useState<HTMLElement | null>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -88,21 +77,24 @@ export function OnboardingTour({ state, locale, dispatch, targetElement, onMissi
         : ['Snapshot list', 'No local snapshots are available in this session. In the desktop app, this screen lists stored versions without changing data.']
       : activeText;
   useEffect(() => {
-    if (!state.step) { setRect(null); targetRef.current = null; setTargetNode(null); return; }
+    if (!state.step) { setRect(null); setCornerRadii(null); targetRef.current = null; setTargetNode(null); return; }
     const updateSuspension = () => setSuspended(Boolean(document.querySelector('.rds-sb-modal-backdrop, dialog[open]')));
     let scrolled = false;
     const update = () => {
       updateSuspension();
-      if (!definition?.target) { targetRef.current = null; setTargetNode(null); setRect(null); return; }
+      if (!definition?.target) { targetRef.current = null; setTargetNode(null); setRect(null); setCornerRadii(null); return; }
       const element = targetElement?.(definition.target) ?? document.querySelector<HTMLElement>(`[data-tutorial-target="${definition.target}"]`);
       const blocked = element?.matches(':disabled,[aria-disabled="true"]') && element.getAttribute('data-tutorial-pending') !== 'true';
-      if (!element?.isConnected || element.getClientRects().length === 0 || blocked) { targetRef.current = null; setTargetNode(null); setRect(null); return; }
+      if (!element?.isConnected || element.getClientRects().length === 0 || blocked) { targetRef.current = null; setTargetNode(null); setRect(null); setCornerRadii(null); return; }
       targetRef.current = element;
       setTargetNode((previous) => previous === element ? previous : element);
       if (!scrolled) { element.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); scrolled = true; }
       const bounds = element.getBoundingClientRect();
       const next = tutorialRect(bounds, window.innerWidth, window.innerHeight);
       setRect((previous) => previous && previous.top === next.top && previous.left === next.left && previous.width === next.width && previous.height === next.height ? previous : next);
+      const style = window.getComputedStyle(element);
+      const nextRadii = tutorialCornerRadii(style, bounds.width, bounds.height);
+      setCornerRadii((previous) => JSON.stringify(previous) === JSON.stringify(nextRadii) ? previous : nextRadii);
     };
     let frame = 0;
     const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(update); };
@@ -201,10 +193,18 @@ export function OnboardingTour({ state, locale, dispatch, targetElement, onMissi
     if (previous && onBack) onBack(previous);
     else if (previous) dispatch({ type: 'back', step: previous });
   };
-  const allShields = shields(rect);
+  const cutout = rect ? { top: rect.top - 4, left: rect.left - 4, width: rect.width + 8, height: rect.height + 8 } : null;
+  const allShields = tutorialShields(cutout, window.innerWidth, window.innerHeight, cornerRadii ?? undefined);
   return <div className="tutorial-layer" aria-live="polite">
+    <svg className="tutorial-dimmer" aria-hidden="true">
+      <defs><mask id="tutorial-cutout" maskUnits="userSpaceOnUse">
+        <rect width="100%" height="100%" fill="white" />
+        {cutout && <path d={tutorialCutoutPath(cutout, cornerRadii ?? undefined)} fill="black" />}
+      </mask></defs>
+      <rect width="100%" height="100%" fill="rgba(0,0,0,.72)" mask="url(#tutorial-cutout)" />
+    </svg>
     {allShields.map((box, i) => <div key={i} className="tutorial-shield" aria-hidden="true" style={box} />)}
-    {rect && <div className="tutorial-spotlight" aria-hidden="true" style={{ top: rect.top - 3, left: rect.left - 3, width: rect.width + 6, height: rect.height + 6 }} />}
+    {rect && <div className="tutorial-spotlight" aria-hidden="true" style={{ top: rect.top - 4, left: rect.left - 4, width: rect.width + 8, height: rect.height + 8, borderTopLeftRadius: cornerRadii ? `${cornerRadii.topLeft[0]}px ${cornerRadii.topLeft[1]}px` : undefined, borderTopRightRadius: cornerRadii ? `${cornerRadii.topRight[0]}px ${cornerRadii.topRight[1]}px` : undefined, borderBottomRightRadius: cornerRadii ? `${cornerRadii.bottomRight[0]}px ${cornerRadii.bottomRight[1]}px` : undefined, borderBottomLeftRadius: cornerRadii ? `${cornerRadii.bottomLeft[0]}px ${cornerRadii.bottomLeft[1]}px` : undefined }} />}
     <button className="tutorial-skip-fixed" type="button" onClick={() => dispatch({ type: 'skip' })}>{locale === 'pt-BR' ? 'Pular tutorial' : 'Skip tutorial'}</button>
     <section ref={cardRef} className={`tutorial-card tutorial-arrow-${position.arrow}`} role="dialog" aria-modal="false" aria-labelledby="tutorial-title" aria-describedby="tutorial-copy" style={{ top: position.top, left: position.left }}>
       <div className="tutorial-card-head"><span>{locale === 'pt-BR' ? `Etapa ${index + 1} de ${ordered.length}` : `Step ${index + 1} of ${ordered.length}`}</span></div>

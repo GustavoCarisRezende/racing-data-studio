@@ -1,5 +1,9 @@
 # Tabela: ordenação, agrupamento e rodadas
 
+## Estado na beta
+
+Ordenação multicoluna e resumo por nova consulta permanecem recursos atuais; resumo não soma linhas agregadas e pode modificar a semântica dos filtros. Confira o contrato v3 para perfis.
+
 Modelos existentes continuam com `table.version: 1`; abrir ou consultar não os
 converte nem salva. Ao adicionar uma segunda ordenação ou selecionar agrupamento,
 a edição passa a usar `table.version: 2`, com `sorts` na ordem de prioridade dos

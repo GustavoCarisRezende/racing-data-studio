@@ -1,5 +1,9 @@
 # Pizza e exportação
 
+## Estado na beta
+
+Pizza, CSV e SVG/PNG estão disponíveis quando compatíveis. O host atual exporta um CSV ou uma imagem, sem manifesto e sem JPEG; as seções históricas abaixo descrevem um fluxo anterior.
+
 As opções da pizza são opt-in em `visualization.pie.version: 1`. Sem esse campo,
 ordem e apresentação de modelos anteriores permanecem iguais. A edição permite
 ordenar por valor crescente ou decrescente, mostrar/ocultar legenda e rótulos e

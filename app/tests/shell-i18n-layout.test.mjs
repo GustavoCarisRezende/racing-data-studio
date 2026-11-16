@@ -39,6 +39,8 @@ test('all F1 tabs share the sandbox shell canvas and tab geometry', async () => 
   assert.match(css, /\.f1-screen \.f1-nav button/);
   assert.doesNotMatch(css, /:has\(\.f1-sandbox\)/);
   assert.match(f1Screen, /<h1>\{t\('f1Heading'\)\}<\/h1>/);
+  assert.match(f1Screen, /className="f1-analysis-description" aria-hidden="true"\s*\/>/);
+  assert.match(css, /\.f1-analysis-description\s*\{\s*height:20px;/);
   assert.doesNotMatch(f1Screen, /<h1>\{view === 'sandbox'/);
   assert.match(f1Screen, /snapshotError\?\.operation === 'delete'.*role="alert"/);
   assert.match(f1Screen, /snapshotError\?\.snapshotId === snapshot\.id && snapshotError\.operation === 'rename'/);

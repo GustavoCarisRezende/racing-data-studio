@@ -1,5 +1,9 @@
 # Contrato de integração da sandbox — protocolo/documento v1
 
+## Estado na beta
+
+O contrato v1 continua relevante para análises fixas, mas não descreve todas as extensões. O host F1 usa também v2/v3, `latest` resolve o snapshot ativo e a exportação atual não produz manifesto.
+
 > Extensões atuais (queries v2, modelos latest, pizza/dispersão, tabela e handoff
 > para Terra): [SANDBOX_V2_HANDOFF.md](SANDBOX_V2_HANDOFF.md). Este documento mantém
 > o contrato legado; análises fixas v1 não são convertidas em modelos.

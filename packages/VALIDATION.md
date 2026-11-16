@@ -1,5 +1,7 @@
 # Registro de validação da sandbox
 
+> **Registro histórico:** resultados e pendências refletem cada revisão datada, não necessariamente o estado atual. Veja [desenvolvimento beta](../docs/DEVELOPMENT.md) e os contratos mais recentes.
+
 ## Revisão funcional/visual — 12/11/2026
 
 - `packages/npm test`: **39 testes aprovados**; `app/npm test`: **19 testes

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   afterSyncExplanation, afterSyncResult, afterYearSelection,
-  initialTutorialState, readTutorialStatus, tutorialReducer, tutorialStorage,
+  initialTutorialState, readTutorialStatus, tutorialCornerRadii, tutorialShields, tutorialReducer, tutorialStorage,
   writeTutorialStatus, TUTORIAL_STORAGE_KEY,
 } from '../src/onboarding.ts';
 
@@ -40,6 +40,29 @@ test('onboarding transitions keep existing snapshots optional and sync errors fr
   assert.equal(afterYearSelection(2024, 2025, false), 'sync-run');
   assert.equal(afterSyncResult(true), 'snapshot-content');
   assert.equal(afterSyncResult(false), null);
+});
+
+test('spotlight geometry follows asymmetric elliptical computed corners and keeps the opening rounded', () => {
+  const computed = {
+    borderTopLeftRadius: '12px 6px',
+    borderTopRightRadius: '20% 25%',
+    borderBottomRightRadius: '3px',
+    borderBottomLeftRadius: '0px',
+  };
+  const radii = tutorialCornerRadii(computed, 100, 40, 4);
+  assert.deepEqual(radii, {
+    topLeft: [16, 10],
+    topRight: [24, 14],
+    bottomRight: [7, 7],
+    bottomLeft: [0, 0],
+  });
+  const shields = tutorialShields({ top: 30, left: 40, width: 100, height: 50 }, 320, 200, radii);
+  assert.equal(shields[0].borderBottomRightRadius, '16px 10px');
+  assert.equal(shields[2].borderBottomLeftRadius, '24px 14px');
+  assert.equal(shields[5].borderTopLeftRadius, '7px 7px');
+  assert.equal(shields[6].left, 0);
+  assert.equal(shields[6].width, 40);
+  assert.equal(shields[7].left, 140);
 });
 
 test('app wiring requires explicit tab/year/sync actions and gives every explanatory step a locale copy', async () => {

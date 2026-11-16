@@ -1,5 +1,9 @@
 # Integração F1 da sandbox v2 — estado parcial
 
+## Estado na beta
+
+O adapter F1 e os perfis v3 estão integrados; modelos `latest` resolvem snapshots ativos. Referências a bloqueios e ausência de validação abaixo são registros das etapas indicadas, não necessariamente pendências atuais.
+
 O adapter F1 resolve `latest` novamente a partir dos snapshots locais em cada
 abertura, aceita uma lista explícita de temporadas e conserva as seleções já
 resolvidas. Uma temporada solicitada e ausente gera erro. A multisseleção usa

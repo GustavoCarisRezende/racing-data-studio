@@ -143,8 +143,7 @@ seleção corrente é mantida ao abrir um modelo do mesmo dataset.
 - Não há query bruta de ocorrências/calendário sem métrica: o editor exige ao menos
   uma métrica e uma dimensão compatíveis. Para datasets apenas tabulares de registros,
   será necessária extensão versionada, não uma contagem fictícia.
-- Acumulados F1 e a garantia latest precisam ser implementados no provider por Terra;
-  esta alteração de biblioteca não os habilita no adapter existente em `app/`.
+- Acumulados e resolução `latest` dependem do provider. O adapter F1 atual os implementa; `latest` resolve o snapshot ativo de cada temporada, não necessariamente o mais recente salvo.
 - Sem fórmulas, SQL, plugins executáveis, média móvel, dashboards,
   importação de arquivos, PDF/XLSX ou autosave.
 - Queries v1/v2 não têm cursor de resultados. O provider deve retornar um agregado
@@ -184,6 +183,6 @@ não auditoria formal de segurança nem medida do instalador final.
 
 **Ainda necessário na integração:** build Tauri de produção com CSP real,
 validação visual nos breakpoints, teclado/leitor de tela (inclusive Orca), zoom 200%,
-alto contraste, desempenho/RAM no WebKitGTK e demais plataformas, backend persistente,
+alto contraste, desempenho/RAM no WebKitGTK e demais plataformas, verificação adicional do backend persistente,
 cancelamento nativo e revisão jurídica das licenças dos dados reais. jsdom não verifica
 layout, contraste nem aplicação de CSP.

@@ -46,7 +46,7 @@ execução no processo; este contrato não é um isolamento de execução de plu
   limites, grupos e identidades. Exportação e gráficos recusam resultados incompletos.
 - CSV prefixa apóstrofo em células textuais potencialmente executáveis por planilhas;
   comportamento de cada software de planilha ainda deve ser testado. Nulos e strings
-  vazias ficam indistinguíveis no CSV; o manifesto declara isso.
+  vazias ficam indistinguíveis no CSV. O fluxo F1 atual não exporta manifesto.
 - Dados, seleções e análises não são enviados para rede, log ou armazenamento pela UI.
   Provider, store e host determinam o I/O efetivo e devem ser auditados separadamente.
 
@@ -56,11 +56,11 @@ filesystem ou URL deve ser concedida à biblioteca.
 
 ## CSP e offline
 
-O código próprio não requer Workers, WASM, Blob/data URLs, `eval`, scripts inline,
+O núcleo não requer Workers, WASM, `eval`, scripts inline,
 CDN, fontes remotas ou `unsafe-eval`. CSS é arquivo externo. ECharts é importado por
 `core/charts/components/renderers`, com linha/barra/pizza/dispersão e SVG registrados.
 
-Isso **não comprova compatibilidade com a CSP do Tauri**. ECharts/zrender manipulam
+A exportação de imagem usa Blob para rasterizar SVG; a CSP do host permite `blob:` em imagens. Isso **não comprova compatibilidade com a CSP do Tauri**. ECharts/zrender manipulam
 DOM e estilos em runtime; a distribuição real precisa ser testada com a política
 existente, WebKitGTK e assets locais. Não liberar `unsafe-inline`, `unsafe-eval`,
 hosts remotos ou `*` apenas para contornar erros. jsdom/SSR não aplicam a CSP do host.
@@ -93,7 +93,7 @@ licenças nem substituto de SBOM e revisão do bundle final.
 
 Os dados sintéticos dos testes são Apache-2.0. Isso não altera a licença de datasets
 reais: o provider precisa declarar atribuição/licença/limitações, que acompanham o
-manifesto exportado. Dados Jolpica, quando integrados, não se tornam Apache-2.0.
+metadados apresentados. O fluxo F1 atual exporta CSV ou imagem sem manifesto; atribuição e licença devem ser preservadas ao compartilhar dados. Dados Jolpica não se tornam Apache-2.0.
 
 ## Antes de release
 

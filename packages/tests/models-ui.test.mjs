@@ -159,6 +159,9 @@ test('new visualization resets a saved configuration, with cancellable discard a
     const originalTitle = document.querySelector('.rds-sb-title input').value;
     await click('Save model');
     assert.deepEqual([...document.querySelectorAll('[role=dialog] .rds-sb-dialog-actions button')].map(b => b.textContent), ['Confirm', 'Cancel']);
+    assert.equal(document.querySelectorAll('[role=dialog] input[type=radio]').length, 0);
+    assert.ok(!document.querySelector('[role=dialog]').textContent.includes('Save as new model'));
+    assert.ok(document.querySelector('[role=dialog] .rds-sb-save-name input'));
     assert.ok([...document.querySelectorAll('[role=dialog] input[type=radio], [role=dialog] input[type=checkbox]')].every(input => input.parentElement.classList.contains('rds-sb-check')));
     await click('Confirm');
     await click('View mode');
@@ -170,7 +173,13 @@ test('new visualization resets a saved configuration, with cancellable discard a
     assert.equal(document.activeElement, input);
     const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
     await act(async () => { setValue.call(input, 'Changed title'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
-    await click('Save model'); await click('Confirm');
+    await click('Save model');
+    const choices = [...document.querySelectorAll('[role=dialog] input[type=radio]')];
+    assert.equal(choices.length, 2);
+    assert.equal(choices[0].checked, true);
+    assert.ok(choices[0].parentElement.textContent.includes('Update'));
+    assert.ok(choices[1].parentElement.textContent.includes('Save as new model'));
+    await click('Confirm');
     assert.equal((await store.models.list())[0].title, 'Changed title');
     await act(async () => { setValue.call(input, 'Unsaved title'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); }); await settle();
     await click('Saved models'); await click('New visualization');
@@ -180,7 +189,7 @@ test('new visualization resets a saved configuration, with cancellable discard a
     assert.equal(document.querySelector('.rds-sb-title input').value, originalTitle);
     assert.equal(document.querySelector('.rds-sb-title input').readOnly, false);
     await click('Save model');
-    assert.equal(document.querySelectorAll('[role=dialog] input[type=radio]').length, 1, 'new visualization is not linked to the saved model');
+    assert.equal(document.querySelectorAll('[role=dialog] input[type=radio]').length, 0, 'new visualization is not linked to the saved model');
     assert.deepEqual([...document.querySelectorAll('[role=dialog] .rds-sb-dialog-actions button')].map(b => b.textContent), ['Confirm', 'Cancel']);
   } finally {
     await act(async () => root.unmount()); dom.window.close();

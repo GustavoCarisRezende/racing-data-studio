@@ -1,5 +1,9 @@
 # Usabilidade desktop e gerenciamento de snapshots
 
+## Estado na beta
+
+tutorial opcional, snapshots, reset nativo e recuperação de desenvolvimento estão disponíveis. Validações descritas abaixo têm escopo e data próprios; não equivalem à validação completa de todas as plataformas.
+
 ## Interface
 
 ### Tutorial de primeiro acesso
@@ -10,7 +14,7 @@ do Sandbox. Popups apontam para os controles enquanto o restante da tela fica
 escurecido. “Pular tutorial” encerra o guia; a conclusão ou dispensa fica salva
 localmente, separada dos modelos.
 
-O menu **Ajuda → Como usar o sistema**, à esquerda do idioma no cabeçalho,
+O menu hambúrguer **Como usar o sistema**, à direita do idioma no cabeçalho,
 reinicia o guia na tela inicial. Alterações não salvas exigem confirmação antes
 do reinício. Quando já existem snapshots, nenhuma nova sincronização é exigida.
 Sem dados, o guia sugere a temporada do ano anterior: a seleção e a importação
@@ -106,8 +110,7 @@ O nome é editado pelo ícone à direita do título e persistido ao salvar.
 
 Os instantes das operações do sistema são exibidos no fuso local do usuário,
 sem mudar os valores UTC armazenados. Datas e horários de eventos e dos dados
-das análises não são convertidos. Nos diálogos, a ação de confirmação vem à
-esquerda e a de cancelamento à direita.
+das análises não são convertidos. A ordem das ações depende do diálogo.
 
 A janela Tauri inicia maximizada, não em tela cheia. F11 alterna a tela cheia
 total e restaura a maximização anterior. Chamadas simultâneas e repetição
@@ -149,7 +152,7 @@ O menu hambúrguer também oferece **Restaurar Configurações Padrão**, em
 vermelho após um separador. No desktop, a opção abre um aviso de exclusão
 permanente; abrir ou cancelar o aviso não limpa dados. Confirmar prepara a
 limpeza e o reinício do aplicativo. Cancelar recebe o foco inicial por segurança,
-mas a confirmação fica à esquerda e o cancelamento à direita.
+e a ordem das ações depende do diálogo.
 
 A build não executa o script Python: usa uma implementação nativa equivalente,
 sem depender de Python instalado. A limpeza deve ocorrer na inicialização antes

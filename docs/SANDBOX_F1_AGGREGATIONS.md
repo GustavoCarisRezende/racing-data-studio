@@ -1,5 +1,9 @@
 # Agregações de pontos F1
 
+## Estado na beta
+
+Pontos oferecem soma, média, mínimo e máximo com propagação de nulos e decimais exatos. A descrição de teste pendente registra a época da alteração; consulte testes atuais antes de concluir cobertura.
+
 Além da soma, o adapter oferece média, mínimo e máximo por grupo de resultados
 observados. Todas propagam valores de pontos ausentes: um grupo que contém qualquer
 valor nulo retorna nulo, não zero nem uma média parcial. Nenhuma é classificação

@@ -32,6 +32,16 @@ test('pie controls save and reopen explicit settings with a synthetic store', as
     assert.equal(chart.piePresentation.showLegend, false);
     assert.equal(chart.slices.at(-1).label, 'Other');
     await click('Export');
+    const dialog = document.querySelector('[role=dialog]');
+    assert.deepEqual([...dialog.querySelectorAll('.rds-sb-dialog-actions button')].map(b => b.textContent), ['Cancel', 'Export']);
+    assert.ok(dialog.querySelector('.rds-sb-export-format select'));
+    for (const text of ['Include legend', 'Include pie labels']) {
+      const option = label(text);
+      assert.ok(option.classList.contains('rds-sb-check'));
+      assert.equal(option.querySelector('input[type=checkbox]').parentElement, option);
+    }
+    const caption = document.querySelector('.rds-sb-chart figcaption');
+    assert.ok(caption.classList.contains('rds-sb-sr'), 'chart warning is not visually rendered');
     const imageFormat = label('Image format').querySelector('select');
     await act(async () => { imageFormat.value = 'png'; imageFormat.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
     await act(async () => label('Include pie labels').querySelector('input').click()); await settle();

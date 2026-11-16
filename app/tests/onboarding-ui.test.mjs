@@ -41,7 +41,7 @@ before(async () => {
 after(async () => { dom?.window.close(); await vite?.close(); });
 
 const labels = {
-  f1Heading: 'Formula 1', sandbox: 'Sandbox', explore: 'Explore events', manageSync: 'Manage synchronizations',
+  f1Heading: 'Formula 1', sandbox: 'Sandbox', sandboxIntro: 'Explore imported seasons and reported results.', explore: 'Explore events', manageSync: 'Manage synchronizations',
   manageSnapshots: 'Manage snapshots', dataSource: 'Data source', f1Tabs: 'Formula 1 sections',
   season: 'Season', searchYear: 'Search years', selectYear: 'Select a matching year',
   importSeason: 'Import', updateSeason: 'Update', imported: 'Imported', notImported: 'Not imported',
@@ -241,6 +241,22 @@ test('actual F1 screen explains synchronization and existing local snapshots wit
   } finally { ui.cleanup(); }
 });
 
+test('F1 keeps an empty reserved description area including inside Sandbox', async () => {
+  const ui = makeActualF1();
+  try {
+    await ui.flush();
+    await ui.next();
+    await ui.click('[data-tutorial-target="category-f1"]');
+    const description = ui.mount.querySelector('.f1-analysis-description');
+    assert.ok(description);
+    assert.equal(description.textContent, '');
+    assert.equal(description.getAttribute('aria-hidden'), 'true');
+    await ui.click('[data-tutorial-target="f1-sandbox-tab"]');
+    assert.equal(description.textContent, '');
+    assert.equal(description.getAttribute('aria-hidden'), 'true');
+  } finally { ui.cleanup(); }
+});
+
 test('actual F1 sync waits for the selected year, keeps errors on the sync gate, and advances only on resolve', async () => {
   const ui = makeActualF1({ syncOutcomes: ['failure', 'success'] });
   try {
@@ -311,6 +327,41 @@ test('container tutorial targets can receive keyboard focus and recover their or
     act(() => root.unmount());
     assert.equal(target.hasAttribute('tabindex'), false);
     assert.equal(target.hasAttribute('aria-describedby'), false);
+    target.remove();
+  }
+});
+
+test('real tour overlay uses mocked computed asymmetric target radii in its spotlight and shields', () => {
+  const mount = document.querySelector('#root');
+  mount.replaceChildren();
+  const target = document.createElement('button');
+  target.dataset.tutorialTarget = 'category-f1';
+  target.textContent = 'Formula 1';
+  document.body.append(target);
+  const root = createRoot(mount);
+  const originalGetComputedStyle = dom.window.getComputedStyle;
+  dom.window.getComputedStyle = (element) => element === target
+    ? {
+        borderTopLeftRadius: '12px 6px',
+        borderTopRightRadius: '20px 10px',
+        borderBottomRightRadius: '4px 2px',
+        borderBottomLeftRadius: '0px',
+      }
+    : originalGetComputedStyle.call(dom.window, element);
+  act(() => root.render(React.createElement(OnboardingTour, {
+    state: { step: 'category', status: 'active' }, locale: 'en-US', dispatch() {},
+  })));
+  try {
+    const spotlight = mount.querySelector('.tutorial-spotlight');
+    assert.equal(spotlight.style.borderTopLeftRadius, '16px 10px');
+    assert.equal(spotlight.style.borderTopRightRadius, '24px 14px');
+    const shields = [...mount.querySelectorAll('.tutorial-shield')];
+    assert.equal(shields[0].style.borderBottomRightRadius, '16px 10px');
+    assert.equal(shields[2].style.borderBottomLeftRadius, '24px 14px');
+    assert.equal(target.getAttribute('aria-describedby'), 'tutorial-copy');
+  } finally {
+    act(() => root.unmount());
+    dom.window.getComputedStyle = originalGetComputedStyle;
     target.remove();
   }
 });

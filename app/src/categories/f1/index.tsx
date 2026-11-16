@@ -167,7 +167,7 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
   const deleteReasonText = (reason?: string | null) => reason === 'ACTIVE_SNAPSHOT' ? t('activeCannotDelete') : reason === 'PINNED_BY_ANALYSIS' ? t('pinnedCannotDelete') : reason === 'REFERENCE_CHECK_FAILED' ? t('deleteCheckFailed') : t('deleteSnapshot');
   return <section className="f1-screen">
     <h1>{t('f1Heading')}</h1>
-    <p className="f1-analysis-description" aria-hidden={view !== 'sandbox'}>{view === 'sandbox' ? t('sandboxIntro') : '\u00a0'}</p>
+    <p className="f1-analysis-description" aria-hidden="true" />
     {!desktop && <p role="status">{t('desktopOnly')}</p>}
     {desktop && <>
       <div className="f1-tab-scroll"><div className="f1-nav" role="tablist" aria-label={t('f1Tabs')}>
