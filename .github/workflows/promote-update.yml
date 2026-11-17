@@ -1,0 +1,71 @@
+name: Promote published release to update channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag (not a draft)
+        required: true
+        type: string
+      channel:
+        description: Stable release may also be promoted to beta to graduate testers
+        required: true
+        default: beta
+        type: choice
+        options: [beta, stable]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-channel-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    environment: update-channel
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+      CHANNEL: ${{ inputs.channel }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: updates
+          path: update-channel
+          # This checkout alone retains the scoped token for the explicit push.
+          persist-credentials: true
+      - name: Verify tag and fetch the published release
+        run: |
+          python3 -B scripts/release.py check --version "${TAG#v}"
+          # A leading v is mandatory; version parsing above forbids shell metacharacters.
+          [[ "$TAG" == v* ]]
+          mkdir downloaded-release-assets
+          gh api "repos/$GH_REPO/releases/tags/$TAG" > published-release.json
+          gh release download "$TAG" --dir downloaded-release-assets
+      - name: Install signature verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y minisign
+      - name: Verify signatures and create the complete manifest
+        run: |
+          python3 -B scripts/update-feed.py --version "${TAG#v}" --channel "$CHANNEL" \
+            --assets downloaded-release-assets --release-json published-release.json \
+            --previous "update-channel/$CHANNEL.json" --output channel.candidate.json
+      - name: Commit only the approved channel manifest
+        run: |
+          cp channel.candidate.json "update-channel/$CHANNEL.json"
+          git -C update-channel config user.name "github-actions[bot]"
+          git -C update-channel config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C update-channel add -- "$CHANNEL.json"
+          git -C update-channel commit -m "updates: promote $TAG to $CHANNEL"
+          git -C update-channel push origin HEAD:updates

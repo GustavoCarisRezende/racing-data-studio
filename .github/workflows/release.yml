@@ -1,0 +1,79 @@
+name: Prepare signed release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, for example v0.0.1-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preparation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Validate tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]]; then
+            echo "Invalid release tag"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+  build:
+    needs: validate
+    uses: ./.github/workflows/build-candidate.yml
+    with:
+      ref: refs/tags/${{ needs.validate.outputs.tag }}
+      signed: true
+    secrets: inherit
+  draft:
+    needs: [validate, build]
+    runs-on: ubuntu-22.04
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.validate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: racing-data-studio-*
+          path: candidates
+      - name: Assemble verified candidate files
+        run: python3 -B scripts/assemble-release.py --source candidates --output release-assets
+      - name: Verify all signatures against the embedded public key
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y minisign
+          python3 -B scripts/verify-release.py --assets release-assets --version "${TAG#v}"
+      - name: Create draft only (never publish automatically)
+        run: |
+          python3 -B scripts/release.py check --version "${TAG#v}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release already exists. Refusing to overwrite artifacts."; exit 1
+          fi
+          args=()
+          if [[ "$TAG" == *-beta.* ]]; then args+=(--prerelease); fi
+          gh release create "$TAG" release-assets/* --verify-tag --draft \
+            --title "Racing Data Studio ${TAG#v}" \
+            --notes "Signed candidate. Validate clean installation and update before publishing. See docs/en-US/RELEASING.md." \
+            "${args[@]}"

@@ -131,6 +131,16 @@ Dados Jolpica têm [termos próprios](https://github.com/jolpica/jolpica-f1/blob
 
 ## Problemas frequentes
 
+### Atualizações do aplicativo
+
+Em instalações desktop compatíveis, abra o menu do cabeçalho e escolha
+**Verificar atualizações**. Você pode ativar o download automático; instalar ainda
+exige **Instalar e reiniciar** e confirmação. Salve edições pendentes e finalize a
+sincronização antes. Atualizações preservam dados importados e modelos salvos.
+Builds locais sem assinatura e instalações MSI não se atualizam sozinhos nesta
+integração inicial. Veja o [estado das releases e updater](RELEASING.md) para
+ativação e limites; o AppImage de teste anterior não contém este updater.
+
 | Situação | O que verificar |
 |---|---|
 | Catálogo indisponível | Verifique a conexão e tente mais tarde; anos alternativos não garantem disponibilidade. |

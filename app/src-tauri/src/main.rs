@@ -3,6 +3,7 @@
 mod f1;
 mod desktop;
 mod reset;
+mod updates;
 #[cfg(debug_assertions)]
 mod dev_assets;
 
@@ -35,9 +36,11 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(std::sync::Arc::new(updates::UpdateState::default()))
         .manage(std::sync::Arc::new(f1::commands::SyncState::default()))
         .manage(desktop::FullscreenRestore::default())
-        .invoke_handler(tauri::generate_handler![desktop::open_github, desktop::toggle_fullscreen, reset::reset_application, f1::commands::f1_export_text, f1::commands::f1_sync, f1::commands::f1_sync_status, f1::commands::f1_local_seasons, f1::commands::f1_analysis_snapshots, f1::commands::f1_analysis_pinned, f1::commands::f1_analyses_list, f1::commands::f1_analysis_load, f1::commands::f1_analysis_save, f1::commands::f1_analysis_delete, f1::commands::f1_models_list, f1::commands::f1_model_load, f1::commands::f1_model_save, f1::commands::f1_model_delete, f1::commands::f1_models_restore_defaults, f1::commands::f1_models_v3_list, f1::commands::f1_model_v3_load, f1::commands::f1_model_v3_save, f1::commands::f1_model_v3_delete, f1::commands::f1_season_details, f1::commands::f1_remote_seasons, f1::commands::f1_snapshots, f1::commands::f1_restore_snapshot, f1::commands::f1_copy_snapshot_events, f1::commands::f1_snapshot_rename, f1::commands::f1_snapshot_activate, f1::commands::f1_snapshot_delete])
+        .invoke_handler(tauri::generate_handler![updates::update_status, updates::update_check, updates::update_download, updates::update_install, desktop::open_github, desktop::toggle_fullscreen, reset::reset_application, f1::commands::f1_export_text, f1::commands::f1_sync, f1::commands::f1_sync_status, f1::commands::f1_local_seasons, f1::commands::f1_analysis_snapshots, f1::commands::f1_analysis_pinned, f1::commands::f1_analyses_list, f1::commands::f1_analysis_load, f1::commands::f1_analysis_save, f1::commands::f1_analysis_delete, f1::commands::f1_models_list, f1::commands::f1_model_load, f1::commands::f1_model_save, f1::commands::f1_model_delete, f1::commands::f1_models_restore_defaults, f1::commands::f1_models_v3_list, f1::commands::f1_model_v3_load, f1::commands::f1_model_v3_save, f1::commands::f1_model_v3_delete, f1::commands::f1_season_details, f1::commands::f1_remote_seasons, f1::commands::f1_snapshots, f1::commands::f1_restore_snapshot, f1::commands::f1_copy_snapshot_events, f1::commands::f1_snapshot_rename, f1::commands::f1_snapshot_activate, f1::commands::f1_snapshot_delete])
         .setup(|app| {
             reset::apply_pending_reset(app.handle())
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;

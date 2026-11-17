@@ -22,3 +22,7 @@ app/src-tauri/target/
 **/snapshot-*.json
 .env
 .env.*
+/artifacts/
+/app/src-tauri/tauri.release.generated.json
+/release-notices.txt
+*.key

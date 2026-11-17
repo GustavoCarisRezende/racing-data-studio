@@ -1,6 +1,6 @@
 [package]
 name = "racing-data-studio"
-version = "0.1.0"
+version = "0.0.1-beta.1"
 description = "Local-first motorsport data studio"
 authors = ["Racing Data Studio contributors"]
 edition = "2021"
@@ -11,6 +11,7 @@ tauri-build = { version = "=2.7.4", features = [] }
 [dependencies]
 tauri = { version = "=2.12.5", features = [] }
 tauri-plugin-dialog = "=2.8.4"
+tauri-plugin-updater = "=2.14.1"
 base64 = "=0.23.1"
 rusqlite = { version = "=0.41.1", features = ["bundled"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }

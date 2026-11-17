@@ -1,6 +1,6 @@
 # Desenvolvimento e arquitetura
 
-Esta documentação descreve o código atual. A versão atual do código é `0.1.0`. Os artefatos anunciados em Releases definem a disponibilidade. Linux recebeu testes; Windows e macOS, seus instaladores e o uso completo em Wayland nativo ainda precisam de validação.
+Esta documentação descreve o código atual. A aplicação está sendo preparada como `0.0.1-beta.1`; essa versão não indica publicação. Veja o [estado da implementação de releases](RELEASING.md). Os artefatos anunciados em Releases definem a disponibilidade. Linux recebeu testes; Windows e macOS, seus instaladores e o uso completo em Wayland nativo ainda precisam de validação.
 
 ## Arquitetura e dados
 

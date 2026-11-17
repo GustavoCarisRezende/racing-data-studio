@@ -1,0 +1,82 @@
+import importlib.util
+import json
+import sys
+import tarfile
+import tempfile
+import unittest
+from pathlib import Path
+
+SPEC = importlib.util.spec_from_file_location("release", Path(__file__).parents[1] / "release.py")
+release = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = release
+SPEC.loader.exec_module(release)
+
+
+class ReleaseTests(unittest.TestCase):
+    def fixture(self, root):
+        (root / "app/src-tauri").mkdir(parents=True)
+        (root / "app/package.json").write_text('{"version": "0.1.0", "dependencies": {"x": "1.2.3"}}\n')
+        (root / "app/package-lock.json").write_text(json.dumps({
+            "version": "0.1.0",
+            "packages": {"": {"version": "0.1.0"}, "node_modules/x": {"version": "1.2.3"}},
+        }))
+        (root / "app/src-tauri/tauri.conf.json").write_text('{"version": "0.1.0"}\n')
+        (root / "app/src-tauri/Cargo.toml").write_text('[package]\nversion = "0.1.0"\n')
+        (root / "app/src-tauri/Cargo.lock").write_text(
+            '[[package]]\nname = "racing-data-studio"\nversion = "0.1.0"\n\n'
+            '[[package]]\nname = "other"\nversion = "1.2.3"\n'
+        )
+
+    def test_synchronized_version_and_preserved_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            release.set_version("0.0.1-beta.1", root)
+            self.assertEqual(release.check_version(root=root), "0.0.1-beta.1")
+            lock = json.loads((root / "app/package-lock.json").read_text())
+            self.assertEqual(lock["packages"]["node_modules/x"]["version"], "1.2.3")
+            self.assertIn('name = "other"\nversion = "1.2.3"', (root / "app/src-tauri/Cargo.lock").read_text())
+            with self.assertRaises(ValueError):
+                release.check_version("0.0.1-beta.2", root)
+
+    def test_invalid_versions_do_not_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            for version in ("v0.0.1", "0.0.1-beta.0", "0.0.1-beta.01", "01.0.0", "256.0.0", "1.2.65536", "1.0.0-rc.1"):
+                with self.assertRaises(ValueError):
+                    release.set_version(version, root)
+            self.assertEqual(release.check_version(root=root), "0.1.0")
+
+    def test_archive_whitelist_and_executable_mode(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for locale in ("en-US", "pt-BR"):
+                path = root / "docs" / locale
+                path.mkdir(parents=True)
+                (path / "LINUX_TEST_BUILD.md").write_text("test instructions")
+            (root / "LICENSE").write_text("license")
+            (root / "private.sqlite").write_text("never distribute")
+            image = root / "fixture.AppImage"
+            header = bytearray(64)
+            header[:4] = b"\x7fELF"
+            header[8:11] = b"AI\x02"
+            header[18:20] = b"\x3e\x00"
+            image.write_bytes(header)
+            notices = root / "notices.txt"
+            notices.write_text("third-party notices")
+            archive = release.linux_archive(image, root / "out", "0.0.1-beta.1", notices, root)
+            with tarfile.open(archive) as tar:
+                entries = tar.getmembers()
+                self.assertEqual(len(entries), 5)
+                self.assertEqual(entries[0].mode, 0o755)
+                self.assertFalse(any("sqlite" in entry.name for entry in entries))
+            release.checksums(root / "out")
+            self.assertIn(archive.name, (root / "out/SHA256SUMS").read_text())
+            image.write_bytes(b"not an appimage")
+            with self.assertRaises(ValueError):
+                release.linux_archive(image, root / "out", "0.0.1", notices, root)
+
+
+if __name__ == "__main__":
+    unittest.main()

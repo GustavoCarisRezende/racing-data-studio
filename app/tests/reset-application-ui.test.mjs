@@ -58,14 +58,19 @@ after(async () => {
 
 const tutorialStatus = JSON.stringify({ version: 1, status: 'completed' });
 
-function mountApp({ desktop = true, invoke = async () => undefined } = {}) {
+async function mountApp({ desktop = true, invoke = async () => undefined } = {}) {
   const mount = document.querySelector('#fixture');
   mount.replaceChildren();
   localStorage.setItem(TUTORIAL_STORAGE_KEY, tutorialStatus);
 
   const calls = [];
+  const readOnlyCalls = [];
   const ipc = {
     invoke: async (...args) => {
+      if (args[0] === 'update_status') {
+        readOnlyCalls.push(args);
+        return { enabled: false, phase: 'disabled', currentVersion: '0.0.1-beta.1', version: null, notes: null, downloaded: 0, total: null, error: null };
+      }
       calls.push(args);
       return invoke(...args);
     },
@@ -76,11 +81,12 @@ function mountApp({ desktop = true, invoke = async () => undefined } = {}) {
   dom.window.__TAURI_INTERNALS__ = ipc;
 
   const root = createRoot(mount);
-  act(() => root.render(React.createElement(App)));
+  await act(async () => { root.render(React.createElement(App)); });
 
   return {
     mount,
     calls,
+    readOnlyCalls,
     root,
     async click(selector) {
       const element = mount.querySelector(selector);
@@ -106,8 +112,8 @@ async function openResetDialog(ui) {
   assert.equal(ui.mount.querySelector('.reset-dialog').open, true);
 }
 
-test('menu renders separator and red reset option; opening and cancelling invokes no IPC', async () => {
-  const ui = mountApp();
+test('menu renders reset option; opening/canceling never invokes a mutating IPC (startup updater status is read-only)', async () => {
+  const ui = await mountApp();
   try {
     const menu = ui.mount.querySelector('.tutorial-menu-options');
     assert.ok(menu.querySelector('button'));
@@ -119,6 +125,7 @@ test('menu renders separator and red reset option; opening and cancelling invoke
 
     await openResetDialog(ui);
     assert.equal(ui.calls.length, 0);
+    assert.deepEqual(ui.readOnlyCalls, [['update_status', {}, undefined]]);
     assert.equal(document.activeElement, ui.mount.querySelector('.reset-dialog-actions button:last-child'));
     const buttons = [...ui.mount.querySelectorAll('.reset-dialog-actions button')];
     assert.deepEqual(buttons.map((button) => button.textContent), ['Confirm reset', 'Cancel']);
@@ -136,7 +143,7 @@ test('menu renders separator and red reset option; opening and cancelling invoke
 test('explicit confirmation invokes the reset command exactly once and keeps both actions disabled while pending', async () => {
   let resolveReset;
   const pendingReset = new Promise((resolve) => { resolveReset = resolve; });
-  const ui = mountApp({ invoke: () => pendingReset });
+  const ui = await mountApp({ invoke: () => pendingReset });
   try {
     await openResetDialog(ui);
     const confirm = ui.mount.querySelector('.reset-dialog-actions button:first-child');
@@ -144,7 +151,7 @@ test('explicit confirmation invokes the reset command exactly once and keeps bot
     assert.deepEqual(ui.calls, [['reset_application', {}, undefined]]);
     assert.equal(confirm.disabled, true);
     assert.equal(ui.mount.querySelector('.reset-dialog-actions button:last-child').disabled, true);
-    assert.match(ui.mount.querySelector('[role="status"]').textContent, /Resetting and restarting/);
+    assert.match(ui.mount.querySelector('.reset-dialog [role="status"]').textContent, /Resetting and restarting/);
 
     // Even a direct duplicate click cannot start a second IPC request.
     await ui.click('.reset-dialog-actions button:first-child');
@@ -160,7 +167,7 @@ test('explicit confirmation invokes the reset command exactly once and keeps bot
 
 test('IPC rejection leaves the tutorial marker intact, displays a recoverable error and allows retry', async () => {
   let attempts = 0;
-  const ui = mountApp({
+  const ui = await mountApp({
     invoke: async () => {
       attempts += 1;
       if (attempts === 1) throw new Error('mocked IPC rejection');
@@ -187,7 +194,7 @@ test('IPC rejection leaves the tutorial marker intact, displays a recoverable er
 });
 
 test('browser build disables reset with an explanation and cannot invoke native IPC', async () => {
-  const ui = mountApp({ desktop: false });
+  const ui = await mountApp({ desktop: false });
   try {
     const option = ui.mount.querySelector('.reset-menu-option');
     assert.equal(option.disabled, true);

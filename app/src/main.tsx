@@ -10,6 +10,7 @@ import categoryMark from './assets/category-mark.svg';
 import { initialTutorialState, readTutorialStatus, tutorialReducer, tutorialStorage, writeTutorialStatus, type TutorialStep } from './onboarding';
 import { nextTutorialStep, OnboardingTour } from './onboarding-tour';
 import { RestartConfirmation } from './restart-confirmation';
+import { UpdateDialog } from './update-dialog';
 import './style.css';
 
 export function App() {
@@ -24,6 +25,7 @@ export function App() {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState(false);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
   const fullscreenBusy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -145,6 +147,9 @@ export function App() {
         <summary aria-label={locale === 'pt-BR' ? 'Abrir menu' : 'Open menu'} title={locale === 'pt-BR' ? 'Menu' : 'Menu'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></summary>
         <div className="tutorial-menu-options">
           <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); beginRestart(); }}>{locale === 'pt-BR' ? 'Como usar o sistema' : 'How to use the system'}</button>
+          <button type="button" disabled={!desktop} onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open'); setUpdatesOpen(true);
+          }}>{locale === 'pt-BR' ? 'Verificar atualizações' : 'Check for updates'}</button>
           <hr />
           <button className="reset-menu-option" type="button" disabled={!desktop} title={!desktop ? t('resetDesktopOnly') : undefined} onClick={(event) => {
             event.currentTarget.closest('details')?.removeAttribute('open');
@@ -154,6 +159,7 @@ export function App() {
       </details>
       </div>
     </header>
+    <UpdateDialog locale={locale} open={updatesOpen} onOpen={() => setUpdatesOpen(true)} onClose={() => setUpdatesOpen(false)} dirty={dirty} blocked={resetBusy || resetDialogOpen} />
     <main className="main">
       <img className="background-art" src={background} alt="" aria-hidden="true" />
       <div className="content">{active ? <div className="module-screen"><button className="back" type="button" onClick={() => { setActiveId(null); setDirty(false); setHasLocalSnapshots(false); }}>{t('back')}</button><active.Screen t={t} locale={locale} tutorial={{ step: tutorial.step, onStep: setTutorialStep, onTarget: registerTutorialTarget, onDirtyChange: setDirty, onLocalSnapshotsChange: setHasLocalSnapshots, hasLocalSnapshots }} /></div> : <>

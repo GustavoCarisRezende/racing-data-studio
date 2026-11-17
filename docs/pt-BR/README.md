@@ -40,6 +40,7 @@ Dados: [Jolpica F1 API](https://github.com/jolpica/jolpica-f1), contribuidores J
 
 - [Guia de uso](USER_GUIDE.md) · [Testes e contribuição](BETA.md) · [Modelo de issue](models/CONTRIBUTION_TEMPLATE.md)
 - [Índice da documentação](../README.md) · [Desenvolvimento, arquitetura, segurança e testes](DEVELOPMENT.md)
+- [Implementação de releases e updater](RELEASING.md) · [Builds de teste Linux](LINUX_TEST_BUILD.md)
 - [Pacotes da sandbox](packages/README.md) · [Usabilidade e snapshots](DESKTOP_USABILITY.md) · [Identidade visual](IDENTIDADE_VISUAL.md)
 - Os demais documentos em `docs/` incluem contratos, handoffs e registros históricos; datas e ressalvas identificam o contexto de cada revisão.
 

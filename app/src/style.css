@@ -247,3 +247,17 @@ button:focus-visible, select:focus-visible, dialog button:focus-visible { outlin
 @media (max-width:900px) { .sync-year-picker { row-gap:12px; } }
 @media (max-width:760px) { .sync-year-picker { align-items:flex-start; gap:10px 12px; } .sync-year-selection { align-items:flex-start; } .sync-only-missing { max-width:100%; } }
 @media (max-width:560px) { .sync-year-selection { flex-basis:100%; } }
+/* Update installation is always explicit; notes remain plain text. */
+.update-dialog { width: min(540px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 24px; color: #f5f7fa; background: #1a1f29; border: 1px solid #2a3140; border-radius: 10px; }
+.update-dialog::backdrop { background: #000a; }
+.update-dialog h2 { margin-top: 0; }
+.update-dialog progress { width: 100%; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font: inherit; }
+.update-preference, .update-actions { display: flex; align-items: center; gap: 12px; }
+.update-preference { margin: 16px 0; }
+.update-actions { justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+.update-actions button, .update-notice { font: inherit; border: 1px solid #536071; border-radius: 8px; padding: 10px 16px; background: #1a1f29; color: #f3f5fa; cursor: pointer; }
+.update-actions button:first-child { background: #c91e3c; border-color: #c91e3c; }
+.update-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.update-actions button:focus-visible, .update-notice:focus-visible { outline: 2px solid #ff8295; outline-offset: 3px; }
+.update-notice { position: fixed; right: 20px; bottom: 24px; z-index: 50; max-width: calc(100vw - 40px); }

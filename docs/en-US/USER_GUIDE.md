@@ -131,6 +131,16 @@ Jolpica data has [its own terms](https://github.com/jolpica/jolpica-f1/blob/main
 
 ## Troubleshooting
 
+### Application updates
+
+On supported desktop installations, open the header menu and choose **Check for
+updates**. You can enable automatic downloads; installation still requires
+**Install and restart** and confirmation. Save pending edits and finish
+synchronization first. Updates preserve imported data and saved templates.
+Unsigned local builds and MSI installations do not self-update in the initial
+integration. See [release and updater status](RELEASING.md) for activation and
+platform limits; the earlier test AppImage does not contain this updater.
+
 | Situation | What to check |
 |---|---|
 | Catalog unavailable | Check connectivity and try later; alternative years do not guarantee availability. |

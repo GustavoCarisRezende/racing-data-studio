@@ -1,6 +1,6 @@
 # Development and architecture
 
-This documentation describes the current code. The current code version is `0.1.0`. Artifacts announced in Releases determine availability. Linux has received testing; Windows, macOS, their installers, and full native Wayland operation still require validation.
+This documentation describes the current code. The application is being prepared as `0.0.1-beta.1`; this version is not a claim of publication. See [release implementation status](RELEASING.md). Artifacts announced in Releases determine availability. Linux has received testing; Windows, macOS, their installers, and full native Wayland operation still require validation.
 
 ## Architecture and data
 
