@@ -84,6 +84,7 @@ Os nomes abaixo são Rust; o transporte Tauri converte nomes de argumentos confo
 | `f1_restore_snapshot`, `f1_copy_snapshot_events` | `year`, `id`; restaurar ou criar projeções suplementares por evento, estas apenas no Linux. |
 | `f1_export_text` | `kind` (`csv`, `svg`, `png`) e `content`; seletor nativo escolhe o destino, sem caminho arbitrário do frontend. |
 | `reset_application`, `open_github`, `toggle_fullscreen` | Sem argumentos de usuário; reset confirmado na UI, URL fixa e alternância de tela cheia. |
+| `set_application_zoom` | `factor` finito entre 0.7 e 2.0; zoom nativo restrito à janela principal. |
 
 `build.rs` declara os comandos e `capabilities/f1-main.json` atribui permissões à janela `main`. `reset_application`, `open_github` e `toggle_fullscreen` também verificam a janela explicitamente; os comandos F1 não devem ser descritos como tendo todos esse mesmo guard interno: sua autorização de janela depende da capability. Restrições e validações do backend continuam necessárias; não confiar apenas na UI.
 

@@ -11,6 +11,8 @@ import { initialTutorialState, readTutorialStatus, tutorialReducer, tutorialStor
 import { nextTutorialStep, OnboardingTour } from './onboarding-tour';
 import { RestartConfirmation } from './restart-confirmation';
 import { UpdateDialog } from './update-dialog';
+import { ZoomControls } from './zoom-controls';
+import { compactCategoryViewport } from './viewport-layout';
 import './style.css';
 
 export function App() {
@@ -26,6 +28,9 @@ export function App() {
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
+  const appliedZoom = useRef(1);
+  const compactFrame = useRef(0);
+  const [compactLayout, setCompactLayout] = useState(() => compactCategoryViewport(window.innerWidth, window.innerHeight, 1));
   const fullscreenBusy = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -33,12 +38,36 @@ export function App() {
   const resetCancelRef = useRef<HTMLButtonElement>(null);
   const resetBusyRef = useRef(false);
   const tutorialElements = useRef(new Map<string, HTMLElement>());
+  const menuRef = useRef<HTMLDetailsElement>(null);
   const t = (key: keyof typeof messages['en-US']) => messages[locale][key];
   const desktop = isTauri();
   const active = categories.find((category) => category.id === activeId);
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const filteredCategories = categories.filter((category) => normalize(t(category.name)).includes(normalize(query)));
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  useEffect(() => {
+    const closeOutsideMenu = (event: PointerEvent) => {
+      const menu = menuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener('pointerdown', closeOutsideMenu);
+    return () => document.removeEventListener('pointerdown', closeOutsideMenu);
+  }, []);
+  const measureCompactLayout = useCallback(() => {
+    cancelAnimationFrame(compactFrame.current);
+    compactFrame.current = requestAnimationFrame(() => setCompactLayout(
+      compactCategoryViewport(window.innerWidth, window.innerHeight, appliedZoom.current),
+    ));
+  }, []);
+  const onZoomChange = useCallback((factor: number) => {
+    appliedZoom.current = factor;
+    measureCompactLayout();
+  }, [measureCompactLayout]);
+  useEffect(() => {
+    measureCompactLayout();
+    window.addEventListener('resize', measureCompactLayout);
+    return () => { cancelAnimationFrame(compactFrame.current); window.removeEventListener('resize', measureCompactLayout); };
+  }, [measureCompactLayout]);
   useEffect(() => {
     if (readTutorialStatus(tutorialStorage()) === 'eligible') dispatchTutorial({ type: 'start' });
   }, []);
@@ -126,13 +155,14 @@ export function App() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [locale]);
 
-  return <div className="app-shell">
+  return <div className={`app-shell${active ? ' app-shell--category' : ''}${active && compactLayout ? ' app-shell--compact' : ''}`}>
     <header className="masthead">
       <div className="brand">
         <img className="brand-image" src={logo} alt={t('title')} />
         <span className="brand-separator" aria-hidden="true" />
         <strong className="brand-text" aria-hidden="true">{t('title')}</strong>
       </div>
+      {active && <span className="masthead-category" aria-hidden="true">{t(active.name)}</span>}
       <div className="header-actions">
       <div className="locale-control">
         <label htmlFor="locale">{t('language')}</label>
@@ -143,9 +173,11 @@ export function App() {
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7 5 5 5-5" /></svg>
         </div>
       </div>
-      <details className="tutorial-menu" onKeyDown={(event) => { if (event.key === 'Escape') event.currentTarget.open = false; }}>
+      <details ref={menuRef} className="tutorial-menu" onKeyDown={(event) => { if (event.key === 'Escape') event.currentTarget.open = false; }}>
         <summary aria-label={locale === 'pt-BR' ? 'Abrir menu' : 'Open menu'} title={locale === 'pt-BR' ? 'Menu' : 'Menu'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></summary>
         <div className="tutorial-menu-options">
+          <ZoomControls locale={locale} onZoomChange={onZoomChange} />
+          <hr />
           <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); beginRestart(); }}>{locale === 'pt-BR' ? 'Como usar o sistema' : 'How to use the system'}</button>
           <button type="button" disabled={!desktop} onClick={(event) => {
             event.currentTarget.closest('details')?.removeAttribute('open'); setUpdatesOpen(true);

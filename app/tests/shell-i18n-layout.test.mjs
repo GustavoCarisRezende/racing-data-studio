@@ -55,3 +55,19 @@ test('snapshot operation errors have localized inline copy in both supported lan
     }
   }
 });
+
+test('short desktop windows use a conditional centered category title without cropping the workspace', async () => {
+  const css = await readFile(new URL('../src/style.css', import.meta.url), 'utf8');
+  const shell = await readFile(new URL('../src/main.tsx', import.meta.url), 'utf8');
+  assert.match(shell, /active \? ' app-shell--category'/);
+  assert.match(shell, /active && <span className="masthead-category" aria-hidden="true">\{t\(active\.name\)\}/);
+  assert.match(css, /\.masthead-category\s*\{\s*display:none;/);
+  assert.match(shell, /active && compactLayout \? ' app-shell--compact'/);
+  assert.match(css, /@media \(min-width:900px\)/);
+  assert.doesNotMatch(css, /max-height:850px/);
+  assert.match(css, /grid-template-columns:minmax\(0,1fr\) auto minmax\(0,1fr\)/);
+  assert.match(css, /\.app-shell--compact \.f1-screen>h1\s*\{[^}]*clip-path:inset\(50%\)/);
+  assert.match(css, /\.app-shell--compact \.f1-analysis-description\s*\{\s*display:none;/);
+  assert.match(css, /\.f1-sandbox \.rds-sb-chart-surface\s*\{\s*height:clamp\(220px,calc\(100dvh - 420px\),310px\)/);
+  assert.doesNotMatch(css, /\.f1-sandbox[^}]*overflow:hidden/);
+});

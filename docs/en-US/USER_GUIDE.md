@@ -25,6 +25,15 @@ This guide describes the desktop application's features. Source data may be inco
 
 On the home screen, `Ctrl+K` or `⌘K` focuses search; `Esc` removes focus. In F1 tabs, use arrows, `Home` and `End`. On desktop, `F11` toggles fullscreen. The tutorial can be dismissed and reopened; its completion marker is stored locally on the device.
 
+### Zoom and fitting the workspace
+
+On desktop, use **Ctrl + / Ctrl =**, **Ctrl −**, and **Ctrl 0** to increase,
+decrease, or reset interface zoom (**⌘** also works on macOS). The header menu
+shows the percentage and remembers your chosen zoom between launches.
+**Fit to window** tries a readable scale between 85% and 100%, prioritizing the
+Sandbox visualization. It runs only when selected; long content can still scroll.
+Manual zoom ranges from 70% to 200%. This changes presentation, not your data.
+
 ## Importing and updating seasons
 
 In **Manage synchronizations**, search for a year in the selector and confirm the desired option. Check **Only unsynchronized seasons** to restrict the list to years not yet imported; the filter depends on local data loading. Select **Import** or, for a saved year, **Update**.

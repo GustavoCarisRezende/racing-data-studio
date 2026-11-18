@@ -4,6 +4,7 @@
   "description": "Only the local main window may access the F1 commands.",
   "windows": ["main"],
   "permissions": [
+    "allow-set-application-zoom",
     "allow-update-status",
     "allow-update-check",
     "allow-update-download",

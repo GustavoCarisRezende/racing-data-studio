@@ -112,6 +112,28 @@ async function openResetDialog(ui) {
   assert.equal(ui.mount.querySelector('.reset-dialog').open, true);
 }
 
+test('hamburger menu stays open for inside interaction and closes on outside pointerdown', async () => {
+  const ui = await mountApp();
+  try {
+    await ui.click('.tutorial-menu summary');
+    const menu = ui.mount.querySelector('.tutorial-menu');
+    assert.equal(menu.open, true);
+    await act(async () => {
+      ui.mount.querySelector('.zoom-controls-row').dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+    });
+    assert.equal(menu.open, true);
+    await act(async () => {
+      ui.mount.querySelector('.masthead .brand').dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+    });
+    assert.equal(menu.open, false);
+    assert.equal(ui.calls.length, 0);
+    assert.doesNotMatch(ui.mount.textContent, /Fit uses 85%|Ajuste entre 85%/);
+    await ui.click('.tutorial-menu summary');
+    await act(async () => menu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    assert.equal(menu.open, false);
+  } finally { ui.cleanup(); }
+});
+
 test('menu renders reset option; opening/canceling never invokes a mutating IPC (startup updater status is read-only)', async () => {
   const ui = await mountApp();
   try {

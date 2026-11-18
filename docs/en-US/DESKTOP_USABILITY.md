@@ -6,6 +6,47 @@ The optional tutorial, snapshots, native reset, and development recovery are ava
 
 ## Interface
 
+### Short desktop windows
+
+With at least 900 effective CSS pixels of width and about 850 pixels or less of
+usable height normalized to 100% page zoom, the category title is shown at the
+center of the application header.
+The content keeps its semantic heading for screen readers, without displaying a
+second title. Taller windows keep the original title in the content.
+
+This uses available viewport dimensions, not physical monitor resolution:
+desktop scaling and window decorations affect the usable area. Reducing page
+zoom does not turn compact mode off merely because CSS viewport height increases.
+Actual window resizing still updates the layout. In compact mode,
+the header and navigation spacing are reduced, the empty description spacer is
+removed, and the Sandbox builder heading shares a row with its view/edit controls.
+The chart height adapts between 220 and 310 pixels. Controls retain their normal
+size; long settings, tables, and legends remain reachable through normal scrolling.
+Narrow/mobile layouts retain their stacked flow rather than clipping content.
+
+### Interface zoom and fit to window
+
+Desktop zoom uses the native WebView, not a CSS transform. **Ctrl +** (or **Ctrl =**)
+increases zoom, **Ctrl −** decreases it, and **Ctrl 0** restores 100%; **⌘** works
+on macOS. The header menu shows the current percentage with zoom/reset controls.
+Manual levels range from 70% to 200%. The applied level is saved locally and
+restored on startup; blocked storage does not prevent changing zoom in the session.
+
+**Fit to window** is an explicit menu action. It checks the main visualization
+(including its legend), or the current content if no visualization is present.
+It measures actual layout at 100%, 95%, 90%, and 85%, stopping at the first fit
+or retaining the best readable layout. This accounts for responsive breakpoints;
+it does not repeatedly shrink the entire document to eliminate every scrollbar.
+Long tables, legends, or settings may still require scrolling.
+
+The chosen scale is retained, but fit mode does not keep running after resizing.
+Use the action again if needed. Zoom does not change filters, models, or imported
+data. Native errors leave the previous level intact when possible; preference
+errors are reported separately. Native zoom controls are disabled in web previews.
+The `set_application_zoom` IPC command is restricted to the main window and
+validates a finite factor between 0.7 and 2.0; no unrestricted WebView permission
+is granted to frontend code.
+
 ### First-use tutorial
 
 On first use, an optional tutorial introduces the home screen, categories, synchronization, snapshots, data source, exploration, and main Sandbox controls. Popups point to controls while the rest of the screen is dimmed. “Skip tutorial” ends the guide; completion or dismissal is saved locally, separately from models.

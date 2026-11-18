@@ -84,6 +84,7 @@ The names below are Rust names; Tauri converts argument names according to its J
 | `f1_restore_snapshot`, `f1_copy_snapshot_events` | `year`, `id`; restore or create supplemental per-event projections, the latter Linux-only. |
 | `f1_export_text` | `kind` (`csv`, `svg`, `png`) and `content`; a native picker selects the destination, with no arbitrary frontend path. |
 | `reset_application`, `open_github`, `toggle_fullscreen` | No user arguments; UI-confirmed reset, fixed URL, and fullscreen toggle. |
+| `set_application_zoom` | Finite `factor` from 0.7 to 2.0; native zoom restricted to the main window. |
 
 `build.rs` declares commands and `capabilities/f1-main.json` grants permissions to the `main` window. `reset_application`, `open_github`, and `toggle_fullscreen` also explicitly check the window; do not describe all F1 commands as having this same internal guard: their window authorization depends on the capability. Backend restrictions and validation remain necessary; do not rely solely on the UI.
 

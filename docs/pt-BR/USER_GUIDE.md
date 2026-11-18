@@ -25,6 +25,15 @@ Este guia apresenta as funções disponíveis no aplicativo desktop. Dados da fo
 
 Na tela inicial, `Ctrl+K` ou `⌘K` foca a busca; `Esc` retira o foco. Nas abas F1, use setas, `Home` e `End`. No desktop, `F11` alterna tela cheia. O tutorial pode ser dispensado e reaberto; sua marca de conclusão fica localmente no dispositivo.
 
+### Zoom e ajuste da área de trabalho
+
+No desktop, use **Ctrl + / Ctrl =**, **Ctrl −** e **Ctrl 0** para aumentar,
+diminuir ou redefinir o zoom (**⌘** também funciona no macOS). O menu do cabeçalho
+mostra a porcentagem e lembra o nível escolhido entre aberturas.
+**Ajustar à janela** procura uma escala legível entre 85% e 100%, priorizando a
+visualização do Sandbox. Só executa quando acionado; conteúdo longo pode continuar
+exigindo rolagem. O zoom manual vai de 70% a 200%. Isso muda a apresentação, não os dados.
+
 ## Importar e atualizar temporadas
 
 Em **Gerenciar sincronizações**, pesquise um ano no seletor e confirme a opção desejada. Marque **Apenas temporadas não sincronizadas** se quiser restringir a lista a anos ainda não importados; o filtro depende do carregamento dos dados locais. Clique em **Importar** ou, para um ano já salvo, **Atualizar**.

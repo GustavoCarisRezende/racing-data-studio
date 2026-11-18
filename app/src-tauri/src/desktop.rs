@@ -11,6 +11,35 @@ fn main_window(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_zoom(factor: f64) -> Result<f64, String> {
+    if !factor.is_finite() || !(0.7..=2.0).contains(&factor) {
+        return Err("INVALID_ZOOM".into());
+    }
+    Ok((factor * 100.0).round() / 100.0)
+}
+
+#[tauri::command]
+pub fn set_application_zoom(window: WebviewWindow, factor: f64) -> Result<f64, String> {
+    main_window(&window)?;
+    let factor = validate_zoom(factor)?;
+    window.set_zoom(factor).map_err(|_| "ZOOM_FAILED".to_string())?;
+    Ok(factor)
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::*;
+    #[test]
+    fn zoom_is_finite_bounded_and_rounded() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, 0.69, 2.01] {
+            assert!(validate_zoom(value).is_err());
+        }
+        assert_eq!(validate_zoom(0.7).unwrap(), 0.7);
+        assert_eq!(validate_zoom(2.0).unwrap(), 2.0);
+        assert_eq!(validate_zoom(0.951).unwrap(), 0.95);
+    }
+}
+
 #[tauri::command]
 pub fn open_github(window: WebviewWindow) -> Result<(), String> {
     main_window(&window)?;

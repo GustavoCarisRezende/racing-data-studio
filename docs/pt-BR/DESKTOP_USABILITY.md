@@ -6,6 +6,49 @@ Tutorial opcional, snapshots, reset nativo e recuperação de desenvolvimento es
 
 ## Interface
 
+### Janelas desktop com pouca altura
+
+Com largura efetiva de pelo menos 900 pixels CSS e altura útil de aproximadamente
+850 pixels ou menos, normalizada para zoom de 100%,
+o título da categoria aparece centralizado no cabeçalho da aplicação.
+O conteúdo mantém seu título semântico para leitores de tela, sem exibir um
+segundo título. Janelas mais altas mantêm o título original no conteúdo.
+
+A regra considera a área útil, não a resolução física do monitor: escala do
+sistema e decorações da janela afetam o espaço disponível. Reduzir o zoom não
+desativa o modo compacto só porque a altura CSS aumenta. Redimensionar a janela
+continua atualizando o layout. No modo compacto,
+o cabeçalho e a navegação têm menos espaçamento, a descrição vazia deixa de
+reservar espaço e o título do construtor divide a linha com os controles de
+visualização/edição. A altura do gráfico se adapta entre 220 e 310 pixels.
+Os controles mantêm o tamanho normal; configurações, tabelas e legendas longas
+continuam acessíveis por rolagem. Layouts estreitos/móveis mantêm o fluxo
+empilhado, sem cortar conteúdo.
+
+### Zoom da interface e ajuste à janela
+
+O zoom desktop usa o WebView nativo, não uma transformação CSS. **Ctrl +** (ou
+**Ctrl =**) aumenta, **Ctrl −** diminui e **Ctrl 0** retorna a 100%; **⌘** também
+funciona no macOS. O menu do cabeçalho mostra a porcentagem atual e controles
+para aumentar, diminuir e redefinir. Os níveis manuais vão de 70% a 200%.
+O nível aplicado é salvo localmente e restaurado na abertura; armazenamento
+indisponível não impede alterar o zoom na sessão.
+
+**Ajustar à janela** é uma ação explícita no menu. Considera a visualização
+principal (inclusive a legenda), ou o conteúdo atual quando não há visualização.
+Mede o layout real em 100%, 95%, 90% e 85%, parando no primeiro que cabe ou mantendo
+o melhor layout legível. Assim considera os breakpoints responsivos, sem reduzir
+continuamente o documento inteiro para eliminar toda rolagem. Tabelas, legendas
+e configurações longas ainda podem exigir rolagem.
+
+A escala escolhida é mantida, mas o ajuste não fica ativo ao redimensionar.
+Acione-o novamente se necessário. O zoom não altera filtros, modelos ou dados
+importados. Erros nativos preservam o nível anterior quando possível; falhas ao
+salvar a preferência são informadas separadamente. A prévia web mantém os
+controles nativos de zoom desabilitados. O comando IPC `set_application_zoom`
+é restrito à janela principal e valida um fator finito entre 0.7 e 2.0;
+nenhuma permissão genérica de WebView é concedida ao frontend.
+
 ### Tutorial de primeiro acesso
 
 No primeiro acesso, um tutorial opcional apresenta a tela inicial, categorias,
