@@ -24,9 +24,11 @@ export function App() {
   const [dirty, setDirty] = useState(false);
   const [hasLocalSnapshots, setHasLocalSnapshots] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState(false);
+  const [resetStatus, setResetStatus] = useState<'rolledBack' | 'cleanupPending' | null>(null);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const appliedZoom = useRef(1);
   const compactFrame = useRef(0);
@@ -45,6 +47,14 @@ export function App() {
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const filteredCategories = categories.filter((category) => normalize(t(category.name)).includes(normalize(query)));
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  useEffect(() => {
+    if (!desktop) return;
+    let mounted = true;
+    void invoke<string>('reset_status').then((status) => {
+      if (mounted && (status === 'rolledBack' || status === 'cleanupPending')) setResetStatus(status);
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, [desktop]);
   useEffect(() => {
     const closeOutsideMenu = (event: PointerEvent) => {
       const menu = menuRef.current;
@@ -96,6 +106,11 @@ export function App() {
     else restartTour();
   };
   const confirmRestartTour = () => { setConfirmRestart(false); restartTour(); };
+  const confirmNavigation = (proceed: () => void) => {
+    if (dirty) setPendingNavigation(() => proceed);
+    else proceed();
+  };
+  const leaveCategory = () => { setActiveId(null); setDirty(false); setHasLocalSnapshots(false); };
   const cancelReset = () => {
     if (resetBusyRef.current) return;
     setResetError(false);
@@ -125,7 +140,7 @@ export function App() {
   };
   const backTutorial = (step: TutorialStep) => {
     if (step === 'category') {
-      setActiveId(null); dispatchTutorial({ type: 'back', step }); return;
+      confirmNavigation(() => { leaveCategory(); dispatchTutorial({ type: 'back', step }); }); return;
     }
     const target = ({
       'sync-tab': 'f1-sync-tab', 'sync-content': 'f1-sync-tab', 'sync-year': 'f1-sync-tab', 'sync-run': 'f1-sync-tab',
@@ -194,7 +209,8 @@ export function App() {
     <UpdateDialog locale={locale} open={updatesOpen} onOpen={() => setUpdatesOpen(true)} onClose={() => setUpdatesOpen(false)} dirty={dirty} blocked={resetBusy || resetDialogOpen} />
     <main className="main">
       <img className="background-art" src={background} alt="" aria-hidden="true" />
-      <div className="content">{active ? <div className="module-screen"><button className="back" type="button" onClick={() => { setActiveId(null); setDirty(false); setHasLocalSnapshots(false); }}>{t('back')}</button><active.Screen t={t} locale={locale} tutorial={{ step: tutorial.step, onStep: setTutorialStep, onTarget: registerTutorialTarget, onDirtyChange: setDirty, onLocalSnapshotsChange: setHasLocalSnapshots, hasLocalSnapshots }} /></div> : <>
+      {resetStatus && <div className="content" role="alert">{t(resetStatus === 'rolledBack' ? 'resetRolledBack' : 'resetCleanupPending')} <button type="button" onClick={() => setResetStatus(null)}>{t('close')}</button></div>}
+      <div className="content">{active ? <div className="module-screen"><button className="back" type="button" onClick={() => confirmNavigation(leaveCategory)}>{t('back')}</button><active.Screen t={t} locale={locale} confirmNavigation={confirmNavigation} tutorial={{ step: tutorial.step, onStep: setTutorialStep, onTarget: registerTutorialTarget, onDirtyChange: setDirty, onLocalSnapshotsChange: setHasLocalSnapshots, hasLocalSnapshots }} /></div> : <>
         <section className="intro" aria-labelledby="categories-heading">
           <img className="intro-mark" src={categoryMark} alt="" aria-hidden="true" />
           <div className="intro-copy"><h1 id="categories-heading">{t('intro')}</h1><p>{t('subtitle')}</p></div>
@@ -224,7 +240,12 @@ export function App() {
     {shellError && <p className="shell-error" role="alert">{shellError}</p>}
     <OnboardingTour state={tutorial} locale={locale} dispatch={dispatchTutorial} targetElement={tutorialTarget} hasLocalSnapshots={hasLocalSnapshots} onMissingTarget={continueWithoutTarget} onBack={backTutorial} />
     <dialog ref={dialogRef} aria-labelledby="about-title"><h2 id="about-title">{t('title')}</h2><h3>{t('aboutPurpose')}</h3><p>{t('aboutPurposeText')}</p><h3>{t('aboutStart')}</h3><p>{t('aboutStartText')}</p><h3>{t('aboutData')}</h3><p>{t('aboutDataText')}</p><h3>{t('aboutContribute')}</h3><p>{t('aboutContributeText')}</p><h3>{t('aboutLicenses')}</h3><p>{t('aboutLicensesText')}</p><button type="button" onClick={() => dialogRef.current?.close()}>{t('close')}</button></dialog>
-    <RestartConfirmation open={confirmRestart} locale={locale} onCancel={() => setConfirmRestart(false)} onConfirm={confirmRestartTour} />
+    <RestartConfirmation open={confirmRestart || pendingNavigation !== null} locale={locale} navigation={pendingNavigation !== null}
+      onCancel={() => { setPendingNavigation(null); setConfirmRestart(false); }}
+      onConfirm={() => {
+        if (pendingNavigation) { setPendingNavigation(null); pendingNavigation(); }
+        else confirmRestartTour();
+      }} />
     <dialog ref={resetDialogRef} className="reset-dialog" aria-modal="true" aria-labelledby="reset-title" aria-describedby="reset-description" onCancel={(event) => { event.preventDefault(); cancelReset(); }}>
       <h2 id="reset-title">{t('resetSettings')}</h2>
       <p id="reset-description">{t('resetWarning')}</p>

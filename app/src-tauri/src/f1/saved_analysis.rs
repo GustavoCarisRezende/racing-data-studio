@@ -38,6 +38,39 @@ struct Document {
     selection: Selection, visualization: Visualization, filters: Vec<Filter>, created_at: String, updated_at: String,
 }
 type Result<T> = std::result::Result<T, String>;
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotDependent {
+    pub id: String,
+    pub revision: String,
+    pub title: String,
+}
+
+pub fn snapshot_dependents(connection: &Connection, year: i32, snapshot: i64) -> Result<Vec<SnapshotDependent>> {
+    let error = |_| "REFERENCE_CHECK_FAILED".to_string();
+    let year = year.to_string();
+    let snapshot = snapshot.to_string();
+    let mut stmt = connection.prepare("SELECT id, revision, document FROM f1_saved_analyses ORDER BY id").map_err(error)?;
+    let mut rows = stmt.query([]).map_err(error)?;
+    let mut dependents = Vec::new();
+    while let Some(row) = rows.next().map_err(error)? {
+        let raw: String = row.get(2).map_err(error)?;
+        let doc = serde_json::from_str(&raw).map_err(|_| "REFERENCE_CHECK_FAILED".to_string()).and_then(|value| {
+            parse(value).map_err(|_| "REFERENCE_CHECK_FAILED".to_string())
+        })?;
+        let id: String = row.get(0).map_err(error)?;
+        let revision: String = row.get(1).map_err(error)?;
+        if doc.id != id || doc.revision.as_deref() != Some(&revision) {
+            return Err("REFERENCE_CHECK_FAILED".into());
+        }
+        if doc.selection.revisions.iter().any(|r| r.partition_id == year && r.revision_id == snapshot) {
+            dependents.push(SnapshotDependent { id, revision, title: doc.title });
+        }
+    }
+    Ok(dependents)
+}
+
 fn invalid() -> String { "INVALID_CONTRACT".into() }
 fn id(s: &str) -> bool { !s.is_empty() && s.len() <= 128 && !["__proto__", "constructor", "prototype"].contains(&s) && s.bytes().enumerate().all(|(i, c)| c.is_ascii_alphanumeric() || (i > 0 && b"_.:-".contains(&c))) }
 fn timestamp(s: &str) -> bool {

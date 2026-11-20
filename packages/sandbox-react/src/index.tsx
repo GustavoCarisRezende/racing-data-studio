@@ -126,6 +126,8 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
   const [saveDialog, setSaveDialog] = useState(false);
   const [modelsDialog, setModelsDialog] = useState(false);
   const [exportDialog, setExportDialog] = useState(false);
+  const [tableExportDialog, setTableExportDialog] = useState(false);
+  const [includeManifest, setIncludeManifest] = useState(false);
   const visibleChart = useRef<{ source: ChartModel; visible: ChartModel } | null>(null);
   const [saveAsNew, setSaveAsNew] = useState(true);
   const [saveName, setSaveName] = useState('');
@@ -468,10 +470,13 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     } catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; setModelsDialog(true); } }
   }
-  async function exportCsv() {
+  async function exportCsv(manifest = false) {
     if (!host?.exportFiles || !current || !session || !complete) return;
     const controller = new AbortController(); operation.current = controller; setWorking(true); setError('');
-    try { await host.exportFiles(exportTableResult(session.descriptor, current.query, current.result, title, session.visualization.table, locale).filter(file => file.mediaType.startsWith('text/csv')), controller.signal); }
+    try {
+      const files = exportTableResult(session.descriptor, current.query, current.result, title, session.visualization.table, locale);
+      await host.exportFiles(manifest ? files : files.filter(file => file.mediaType.startsWith('text/csv')), controller.signal);
+    }
     catch (e) { if (!controller.signal.aborted) setError(errorMessage(t, e)); }
     finally { if (operation.current === controller) { setWorking(false); operation.current = null; } }
   }
@@ -495,7 +500,16 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
     {saveDialog && <Modal variant="save" label={t('saveChoice')} onClose={() => setSaveDialog(false)}><h3 id={`${uid}-save`}>{t('saveChoice')}</h3>{session?.model && <label className="rds-sb-check"><input type="radio" name={`${uid}-save-mode`} checked={!saveAsNew} onChange={() => setSaveAsNew(false)} />{t('updateSelected')}: {session.model.title}</label>}{session?.model && <label className="rds-sb-check"><input type="radio" name={`${uid}-save-mode`} checked={saveAsNew} onChange={() => setSaveAsNew(true)} />{t('newModel')}</label>}{saveAsNew && <label className="rds-sb-save-name">{t('newName')}<input maxLength={30} value={saveName} onChange={e => setSaveName(e.target.value)} /></label>}<label className="rds-sb-check"><input type="checkbox" checked={saveFilters} onChange={e => setSaveFilters(e.target.checked)} />{t('saveFiltersOption')}</label><label className="rds-sb-check"><input type="checkbox" checked={saveDataSelection} onChange={e => setSaveDataSelection(e.target.checked)} />{t('saveDataSelectionOption')}</label><div className="rds-sb-dialog-actions"><button type="button" disabled={saveAsNew && !saveName.trim()} onClick={() => { setSaveDialog(false); void saveModel(saveAsNew, saveAsNew ? saveName : title); }}>{t('confirm')}</button><button type="button" onClick={() => setSaveDialog(false)}>{t('cancel')}</button></div></Modal>}
     {modelsDialog && <Modal label={t('models')} onClose={() => setModelsDialog(false)}><ModelManager t={t} items={[...modelList, ...savedList.map(item => ({ ...item, id: `legacy:${item.id}` }))]} onOpen={id => { setModelsDialog(false); void restore(!id.startsWith('legacy:'), id.startsWith('legacy:') ? id.slice(7) : id, true); }} onEdit={id => { setModelsDialog(false); void restore(!id.startsWith('legacy:'), id.startsWith('legacy:') ? id.slice(7) : id, true); }} onDelete={id => { setModelsDialog(false); void deleteModel(id); }} onRefresh={() => setStoreRevision(n => n + 1)} onRestoreDefaults={host?.restoreDefaultModels ? () => void restoreDefaults() : undefined} onNew={() => { setModelsDialog(false); void (async () => { if (!d) { setModelsDialog(true); return; } if (dirty && !await confirmAction('discardChanges', title)) { setModelsDialog(true); return; } setEditing(true); setLoad({ datasetId: d.id }); })(); }} canDeleteLegacy={Boolean(store?.delete)} disabled={working || loading} loading={modelsLoading} error={modelListError || error} activeTitle={session?.model?.title} /><button type="button" onClick={() => setModelsDialog(false)}>{t('close')}</button></Modal>}
     {exportDialog && <Modal variant="export" label={t('export')} onClose={() => setExportDialog(false)}><h3>{t('export')}</h3><label className="rds-sb-export-format">{t('imageFormat')}<select value={imageFormat} disabled={working} onChange={e => setImageFormat(e.target.value as ImageExportArtifact['format'])}><option value="svg">SVG</option><option value="png">PNG</option></select></label><label className="rds-sb-check"><input type="checkbox" checked={imageLegend} onChange={e => setImageLegend(e.target.checked)} />{t('imageLegend')}</label>{v?.kind === 'pie' && <label className="rds-sb-check"><input type="checkbox" checked={imageLabels} onChange={e => setImageLabels(e.target.checked)} />{t('imageLabels')}</label>}<div className="rds-sb-dialog-actions"><button type="button" onClick={() => setExportDialog(false)}>{t('cancel')}</button><button type="button" onClick={() => { setExportDialog(false); void exportImage(); }}>{t('export')}</button></div></Modal>}
-    <div className={`rds-sb-layout${editing ? '' : ' rds-sb-view-layout'}`} inert={Boolean(confirmation || saveDialog || modelsDialog || exportDialog)}>
+    {tableExportDialog && <Modal variant="export" label={t('export')} onClose={() => setTableExportDialog(false)}>
+      <h3>{t('export')} CSV</h3>
+      <label className="rds-sb-check"><input type="checkbox" checked={includeManifest} onChange={e => setIncludeManifest(e.target.checked)} />{t('includeManifest')}</label>
+      <p>{t('manifestHelp')}</p>
+      <div className="rds-sb-dialog-actions">
+        <button type="button" onClick={() => setTableExportDialog(false)}>{t('cancel')}</button>
+        <button type="button" onClick={() => { setTableExportDialog(false); void exportCsv(includeManifest); }}>{t('export')}</button>
+      </div>
+    </Modal>}
+    <div className={`rds-sb-layout${editing ? '' : ' rds-sb-view-layout'}`} inert={Boolean(confirmation || saveDialog || modelsDialog || exportDialog || tableExportDialog)}>
       <aside className="rds-sb-panel rds-sb-data" aria-label={t('filters')}>
         {catalog === null ? <p role="status">{t('loading')}</p> : catalog.length === 0 ? <p>{t('empty')}</p> : catalog.length > 1 ? <label>{t('dataset')}<select disabled={working || loading} value={load?.datasetId ?? ''} onChange={e => void requestLoad({ datasetId: e.target.value })}>{catalog.map(item => <option key={item.id} value={item.id}>{localize(item.label, locale)}</option>)}</select></label> : null}
         {primaryField && provider.facet && !d?.capabilities.multiSelection && <div ref={targets.seasons} className="rds-sb-scope" inert={!editing}><label>{localize(primaryField.label, locale)}<select disabled={working || !editing || scopes.loading || !scopeOptions.length} value={primaryValues.length ? JSON.stringify(primaryValues[0]) : ''} onChange={e => changeScope(e.target.value)}>{!primaryValues.length && <option value="">{t(primaryFilter ? 'advancedFilters' : 'all')}</option>}{primaryValues.length > 0 && !scopeOptions.some(item => item.value === primaryValues[0]) && <option value={JSON.stringify(primaryValues[0])}>{fieldValueLabel(primaryField, primaryValues[0]!, locale)}</option>}{scopeOptions.map(item => <option key={JSON.stringify(item.value)} value={JSON.stringify(item.value)}>{fieldValueLabel(primaryField, item.value, locale, item.label)}</option>)}</select></label>{scopes.page?.nextCursor && <button type="button" disabled={scopes.loading || scopeOptions.length >= 1000} onClick={scopes.more}>{t('more')}</button>}{scopes.error && <p role="alert">{t('error')}</p>}</div>}
@@ -514,7 +528,10 @@ export function Sandbox({ provider, store, host, locale: requestedLocale = 'en-U
         <div className="rds-sb-toolbar">
           <div ref={targets.chartTypes} className="rds-sb-chart-types" role="group" aria-label={t('visualizationType')}>{session && d && v && (['line', 'bar', 'table', 'pie', 'scatter'] as const).filter(kind => d.capabilities.charts.includes(kind) && (kind === 'table' || ChartRenderer)).map(kind => <button key={kind} type="button" disabled={!editing || working || (kind === 'line' ? !dimensions.some(f => f.ordered && d.metrics.find(m => m.id === v.metric.metricId)!.groupableBy.includes(f.id)) : !chartAvailable(kind, d, v))} aria-pressed={v.kind === kind} onClick={() => update({ kind })}><Icon name={kind} />{t(kind)}</button>)}</div>
           <div className="rds-sb-actions">{modelsAvailable && <button ref={targets.save} type="button" disabled={!editing || !modelSaveAvailable || !complete || !title.trim() || working} onClick={() => { setSaveAsNew(!session?.model); setSaveName(title); setSaveFilters(session?.model?.saveFilters ?? true); setSaveDataSelection(session?.model?.saveDataSelection ?? true); setSaveDialog(true); }}><Icon name="save" />{t('saveModel')}</button>}
-          {v?.kind === 'table' ? host?.exportFiles && <button ref={targets.export} type="button" disabled={!complete || working} onClick={() => void exportCsv()}><Icon name="export" />{t('export')}</button> : host?.exportImage && chartExporter && <button ref={targets.export} type="button" disabled={!complete || working || !chart || !('model' in chart) || !chart.model} onClick={() => setExportDialog(true)}><Icon name="export" />{t('export')}</button>}</div>
+          {v?.kind === 'table' ? host?.exportFiles && <button ref={targets.export} type="button" disabled={!complete || working} onClick={() => {
+            if (host.supportsExportManifest) { setIncludeManifest(false); setTableExportDialog(true); }
+            else void exportCsv();
+          }}><Icon name="export" />{t('export')}</button> : host?.exportImage && chartExporter && <button ref={targets.export} type="button" disabled={!complete || working || !chart || !('model' in chart) || !chart.model} onClick={() => setExportDialog(true)}><Icon name="export" />{t('export')}</button>}</div>
         </div>
         <div className="rds-sb-feedback">
         {(loading || querying || working) && <p role="status">{t('loading')}</p>}

@@ -1,7 +1,8 @@
 //! Jolpica compatible API. Keep the source responses intact: historical results can
 //! contain shared drives, missing constructors and other exceptional cases.
 use serde_json::Value;
-use std::{collections::{BTreeMap, HashSet, VecDeque}, io::Read, sync::{Mutex, OnceLock}, thread, time::{Duration, Instant}};
+use chrono::{DateTime, Datelike, NaiveDateTime, Utc};
+use std::{collections::{BTreeMap, HashSet, VecDeque}, io::Read, sync::{Mutex, OnceLock}, thread, time::{Duration, Instant, SystemTime}};
 
 #[derive(Debug)]
 pub struct Page {
@@ -190,15 +191,25 @@ fn client() -> Result<reqwest::blocking::Client, String> {
 // Process-wide pacing shared by catalog and imports. The provider's limits are
 // shared with other processes on the same IP and cannot be guaranteed here.
 #[derive(Default)]
-struct RateState { requests: VecDeque<Instant>, blocked_until: Option<Instant>, unknown_cooldown: bool }
+struct RateState { requests: VecDeque<Instant>, cooldown: Option<(Instant, Duration)> }
+
+impl RateState {
+    fn cooldown_remaining(&self) -> Duration {
+        self.cooldown.map_or(Duration::ZERO, |(started, delay)| delay.saturating_sub(started.elapsed()))
+    }
+
+    fn defer(&mut self, delay: Duration) {
+        self.cooldown = Some((Instant::now(), delay.max(self.cooldown_remaining())));
+    }
+}
 fn rate_state() -> &'static Mutex<RateState> {
     static RATE: OnceLock<Mutex<RateState>> = OnceLock::new();
     RATE.get_or_init(|| Mutex::new(RateState::default()))
 }
 fn pace() -> Result<(), String> {
     let mut state = rate_state().lock().map_err(|_| "Rate limiter unavailable")?;
-    if state.unknown_cooldown { return Err("Jolpica returned an unparseable Retry-After; restart only after the requested wait".into()); }
-    if state.blocked_until.is_some_and(|until| Instant::now() < until) { return Err("Jolpica cooldown active; wait before retrying".into()); }
+    let remaining = state.cooldown_remaining();
+    if !remaining.is_zero() { return Err(format!("Jolpica cooldown active; retry after {} seconds", remaining.as_secs().saturating_add(1))); }
     while state.requests.front().is_some_and(|t| t.elapsed() >= Duration::from_secs(3600)) { state.requests.pop_front(); }
     if state.requests.len() >= 450 { return Err("Local hourly request limit reached; wait before retrying".into()); }
     if let Some(last) = state.requests.back() {
@@ -208,9 +219,24 @@ fn pace() -> Result<(), String> {
     Ok(())
 }
 
-fn short_retry_delay(header: &str, attempt: usize) -> Option<Duration> {
-    let seconds = header.parse::<u64>().ok()?;
-    (attempt < 2 && seconds <= 10).then(|| Duration::from_millis(seconds.max(1) * 1000 + 10))
+fn retry_after_delay(header: &str, now: SystemTime) -> Option<Duration> {
+    let header = header.trim();
+    if !header.is_empty() && header.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some(Duration::from_secs(header.parse::<u64>().unwrap_or(u64::MAX).max(1)));
+    }
+    let now = DateTime::<Utc>::from(now);
+    let date = NaiveDateTime::parse_from_str(header, "%a, %d %b %Y %H:%M:%S GMT")
+        .or_else(|_| NaiveDateTime::parse_from_str(header, "%a %b %e %H:%M:%S %Y"))
+        .ok()
+        .or_else(|| {
+            let (day, suffix) = header.rsplit_once('-')?;
+            let (short_year, time) = suffix.split_once(' ')?;
+            let recent_year = now.year();
+            let short_year: i32 = short_year.parse().ok().filter(|number| (0..100).contains(number))?;
+            let year = recent_year + (short_year - recent_year.rem_euclid(100) + 49).rem_euclid(100) - 49;
+            NaiveDateTime::parse_from_str(&format!("{day}-{year} {time}"), "%A, %d-%b-%Y %H:%M:%S GMT").ok()
+        })?;
+    Some((date.and_utc() - now).to_std().unwrap_or_default().max(Duration::from_secs(1)))
 }
 
 fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
@@ -227,22 +253,15 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<String, String
         let status = response.status();
         if status.as_u16() == 429 {
             let retry = response.headers().get(reqwest::header::RETRY_AFTER).and_then(|h| h.to_str().ok()).unwrap_or("");
-            // Never retry earlier than requested; long or HTTP-date delays are left to the user.
-            let seconds = retry.parse::<u64>().ok();
+            let delay = retry_after_delay(retry, SystemTime::now()).unwrap_or(Duration::from_secs(60));
             if let Ok(mut state) = rate_state().lock() {
-                match seconds {
-                    Some(delay) => match Instant::now().checked_add(Duration::from_secs(delay.max(1))) {
-                        Some(until) => state.blocked_until = Some(until),
-                        None => state.unknown_cooldown = true,
-                    },
-                    None => state.unknown_cooldown = true,
-                }
+                state.defer(delay);
             }
-            if let Some(delay) = short_retry_delay(retry, attempt) {
-                thread::sleep(delay);
+            if attempt < 2 && delay <= Duration::from_secs(10) {
+                thread::sleep(delay + Duration::from_millis(10));
                 continue;
             }
-            return Err(format!("Jolpica HTTP 429. Retry-After: {}. Please wait before retrying.", if retry.is_empty() { "unknown" } else { retry }));
+            return Err(format!("Jolpica HTTP 429. Retry after {:.0} seconds.", delay.as_secs_f64().ceil()));
         }
         if status.is_server_error() && attempt < 2 { thread::sleep(Duration::from_secs(1 << attempt)); continue; }
         if !status.is_success() { return Err(format!("Jolpica HTTP error: {status}")); }
@@ -340,13 +359,16 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_only_retries_bounded_numeric_delays() {
-        assert!(short_retry_delay("2", 0).unwrap() >= Duration::from_secs(2));
-        assert!(short_retry_delay("0", 1).unwrap() >= Duration::from_secs(1));
-        assert!(short_retry_delay("11", 0).is_none());
-        assert!(short_retry_delay("2", 2).is_none());
-        assert!(short_retry_delay("Wed, 21 Oct 2030 07:28:00 GMT", 0).is_none());
-        assert!(short_retry_delay("", 0).is_none());
+    fn retry_after_supports_dates_and_the_cooldown_expires() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(784_111_772);
+        assert_eq!(retry_after_delay(" 2 ", now), Some(Duration::from_secs(2)));
+        assert_eq!(retry_after_delay("0", now), Some(Duration::from_secs(1)));
+        for date in ["Sun, 06 Nov 1994 08:49:37 GMT", "Sunday, 06-Nov-94 08:49:37 GMT", "Sun Nov  6 08:49:37 1994"] {
+            assert_eq!(retry_after_delay(date, now), Some(Duration::from_secs(5)));
+        }
+        assert!(retry_after_delay("", now).is_none());
+        let state = RateState { cooldown: Some((Instant::now() - Duration::from_secs(61), Duration::from_secs(60))), ..Default::default() };
+        assert!(state.cooldown_remaining().is_zero());
     }
 
     #[test]

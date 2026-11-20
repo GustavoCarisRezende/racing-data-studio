@@ -203,6 +203,7 @@ test('real DOM tour gates category and tab explanations on clicks and presents s
     assert.match(ui.title(), /Open snapshots/);
     ui.click('[data-tutorial-target="f1-snapshots-tab"]');
     assert.match(ui.title(), /Review local snapshots/);
+    assert.match(ui.mount.querySelector('#tutorial-copy').textContent, /Create backup.*ZIP.*CC BY-NC-SA 4\.0/);
     ui.next();
     assert.match(ui.title(), /Open the data source/);
     ui.click('[data-tutorial-target="f1-source-tab"]');

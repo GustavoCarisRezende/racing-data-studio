@@ -11,10 +11,13 @@ test('CSV export invokes only the chooser-backed command and reports cancellatio
   await assert.rejects(createTextExporter(async () => false)(files), error => error.code === 'EXPORT_CANCELLED');
   await assert.rejects(createTextExporter(async () => { throw 'EXPORT_CREATE_FAILED'; })(files), error => error.code === 'EXPORT_CREATE_FAILED');
   await assert.rejects(exportFiles([]), error => error.code === 'INVALID_EXPORT');
-  await assert.rejects(exportFiles([...files, { name: 'ignored.json', mediaType: 'application/json', text: '{}' }]), error => error.code === 'INVALID_EXPORT');
+  const manifest = { name: 'ignored.json', mediaType: 'application/json', text: '{"format":"rds-table-export","version":1}' };
+  await exportFiles([...files, manifest]);
+  assert.deepEqual(calls[1], ['f1_export_text', { kind: 'csv', content: files[0].text, manifest: manifest.text }]);
+  await assert.rejects(exportFiles([...files, manifest, manifest]), error => error.code === 'INVALID_EXPORT');
   const controller = new AbortController(); controller.abort();
   await assert.rejects(exportFiles(files, controller.signal), error => error.name === 'AbortError');
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
 });
 
 test('SVG/PNG exports are bounded, base64 encoded without paths and cancellation is reported', async () => {

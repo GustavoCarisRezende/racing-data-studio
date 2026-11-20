@@ -75,8 +75,8 @@ Every successful synchronization creates and activates a new version, even when 
 - Names are trimmed, limited to 80 characters, and reject control characters. The comparison key ignores case and some Unicode variants; it is not full canonical Unicode normalization.
 - Uniqueness applies within a season. Automatic names `Snapshot #<id>` are reserved to avoid visual collisions. Confirming its own unchanged automatic name does not write metadata.
 - Actions appear to the right of the name in this order: Rename, Create per-event copies, Restore, Delete. The trash icon is last, with an accessible label and no additional visible text. The record occupies one horizontal row on wide screens and can wrap on smaller screens. Deletion requires modal confirmation.
-- The active snapshot cannot be deleted. The legacy-analysis reference lock was removed; deleting a version referenced by a legacy record may prevent that record from reopening.
-- Checks and deletion of pages and the snapshot occur in the same write transaction, under the cooperative locks used by synchronization.
+- The active snapshot is protected. When deleting an inactive snapshot, the confirmation lists any legacy analyses that will be deleted with it.
+- The app checks the confirmed list and deletes those analyses, pages and the snapshot in the same write transaction.
 - Renaming does not change IDs or filenames. Deletion does not remove already published per-event copies; these copies are not full database copies.
 - Deletion errors appear inside the modal; name conflicts appear beside the edit field rather than relying on hidden technical details.
 

@@ -3,6 +3,13 @@ import type { DatasetDescriptor, FacetRequest, Filter, QueryRequest, ResolvedSel
 
 type Snapshot = { year: number; id: string; storedAt: string; sourceDataAt: string; integrity?: { validatedEndpoints?: string[] }; calendar?: { round: string; raceName?: string | null; date: string | null; time: string | null; sprintDate: string | null; sprintTime: string | null }[]; results: { round: string; session: string; result: { Driver?: { driverId?: string; givenName?: string; familyName?: string }; Constructor?: { constructorId?: string; name?: string }; points?: string | null; grid?: unknown; position?: unknown; laps?: unknown } }[] };
 type Row = Record<string, Scalar>;
+type CatalogEntry = RevisionReference & { counts: { results: number; sprint: number }; hasTeams?: boolean };
+type SnapshotReader = (revisions?: RevisionReference[]) => Promise<Snapshot[]>;
+type CatalogReader = (revisions?: RevisionReference[]) => Promise<CatalogEntry[]>;
+const snapshotRevision = (s: Snapshot): RevisionReference => ({
+  partitionId: String(s.year), revisionId: s.id, sourceDataAt: s.sourceDataAt, storedAt: s.storedAt,
+});
+const revisionKey = (revisions: RevisionReference[]) => JSON.stringify(revisions.map(r => [r.partitionId, r.revisionId, r.sourceDataAt, r.storedAt]));
 const text = (fallback: string, pt: string) => ({ fallback, translations: { 'pt-BR': pt } });
 const dimensions = ['season', 'round', 'session', 'driver', 'team'];
 const allSessionFilter = { fieldId: 'session', op: 'in' as const, values: ['results', 'sprint'] };
@@ -130,17 +137,14 @@ function aggregatePoints(values: Scalar[], aggregation: 'sum' | 'mean' | 'min' |
 }
 
 /** The injected reader is the only native boundary; snapshots are held immutable in this instance. */
-export function createF1AnalysisProvider(read: (revisions?: RevisionReference[]) => Promise<Snapshot[]>, now: () => number = Date.now): SandboxDataProvider {
-  let frozen: { selection: ResolvedSelection; rows: Row[]; chronology: Map<string, number | null>; integrity: Map<string, Set<string>> } | undefined;
-  let pending: Promise<typeof frozen> | undefined;
-  const selections = new Map<string, NonNullable<typeof frozen>>();
-  async function project(snapshots: Snapshot[]) {
+export function createF1AnalysisProvider(read: SnapshotReader, now: () => number = Date.now, readCatalog?: CatalogReader): SandboxDataProvider {
+  type Selection = { selection: ResolvedSelection; catalog: CatalogEntry[]; data?: ReturnType<typeof project> };
+  const selections = new Map<string, Selection>();
+  const projections = new Map<string, Promise<ReturnType<typeof project>>>();
+  function project(snapshots: Snapshot[]) {
       const rows: Row[] = [];
       const chronology = new Map<string, number | null>();
       const integrity = new Map<string, Set<string>>();
-      const revisions = snapshots.map(s => ({ partitionId: String(s.year), revisionId: s.id, sourceDataAt: s.sourceDataAt, storedAt: s.storedAt }));
-      const selection: ResolvedSelection = { protocolVersion: 1, datasetId: descriptor.id, token: crypto.randomUUID(), transformationVersion: 'f1-results-1', revisions };
-      assertSelection(selection);
       for (const s of snapshots) {
         integrity.set(String(s.year), new Set(s.integrity?.validatedEndpoints ?? []));
       const roundNames = new Map<number, string>();
@@ -172,55 +176,104 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
         if (rows.length > 100_000) throw new SandboxError('LIMIT_EXCEEDED', 'Too many occurrences');
       }
       }
-      return { selection, rows, chronology, integrity };
+      return { rows, chronology, integrity };
   }
-  async function load() {
-    if (!pending) pending = (async () => {
-      frozen = await project(await read()); selections.set(frozen.selection.token, frozen); return frozen;
-    })().catch(e => { pending = undefined; throw e; });
-    return (await pending)!;
+
+  async function loadCatalog(revisions?: RevisionReference[]) {
+    if (readCatalog) return { catalog: await readCatalog(revisions) };
+    const snapshots = await read(revisions);
+    const catalog = snapshots.map(snapshot => {
+      const counts = { results: 0, sprint: 0 };
+      for (const result of snapshot.results) {
+        if (result.session === 'results' || result.session === 'sprint') counts[result.session]++;
+      }
+      return { ...snapshotRevision(snapshot), counts, hasTeams: snapshot.results.some(row => row.result.Constructor?.constructorId != null) };
+    });
+    return { catalog, snapshots };
   }
+
+  function rememberSelection(data: Selection) {
+    selections.delete(data.selection.token);
+    selections.set(data.selection.token, data);
+    if (selections.size > 8) selections.delete(selections.keys().next().value!);
+  }
+
   function selected(selection: ResolvedSelection) {
     assertSelection(selection);
     const data = selections.get(selection.token);
-    if (!data || JSON.stringify(selection) !== JSON.stringify(data.selection)) throw new SandboxError('REVISION_MISSING', 'Selection not available in this session');
+    if (!data || selection.datasetId !== data.selection.datasetId || selection.transformationVersion !== data.selection.transformationVersion
+      || revisionKey(selection.revisions) !== revisionKey(data.selection.revisions)) throw new SandboxError('REVISION_MISSING', 'Selection not available in this session');
+    rememberSelection(data);
     return data;
   }
+
+  async function selectedRows(selection: Selection, filters: Filter[], signal?: AbortSignal) {
+    if (selection.data) return selection.data;
+    const seasonFilters = filters.filter(filter => filter.fieldId === 'season');
+    const revisions = selection.selection.revisions.filter(revision => matches({ season: revision.partitionId }, seasonFilters));
+    if (!revisions.length) return project([]);
+    const key = revisionKey(revisions);
+    const pending = projections.get(key) ?? read(revisions).then(snapshots => {
+      if (revisionKey(snapshots.map(snapshotRevision)) !== key) throw new SandboxError('REVISION_MISSING', 'Revision mismatch');
+      return project(snapshots);
+    }).catch(error => {
+      if (projections.get(key) === pending) projections.delete(key);
+      if (error === 'LIMIT_EXCEEDED' || error === 'REVISION_MISSING') throw new SandboxError(error, error);
+      throw error;
+    });
+    projections.delete(key);
+    projections.set(key, pending);
+    if (projections.size > 2) projections.delete(projections.keys().next().value!);
+    const data = await pending;
+    abort(signal);
+    return data;
+  }
+
   return {
-    async listDatasets(signal) { abort(signal); const data = await load(); abort(signal); return data.rows.length ? [{ id: descriptor.id, label: descriptor.label, description: descriptor.description }] : []; },
+    async listDatasets(signal) {
+      abort(signal);
+      const { catalog, snapshots } = await loadCatalog();
+      if (snapshots) project(snapshots);
+      abort(signal);
+      return catalog.some(item => item.counts.results || item.counts.sprint) ? [{ id: descriptor.id, label: descriptor.label, description: descriptor.description }] : [];
+    },
     async describeDataset({ datasetId }, signal) {
       abort(signal); if (datasetId !== descriptor.id) throw new SandboxError('INVALID_CONTRACT', 'Unknown dataset');
-      const data = await load(); abort(signal);
+      const { catalog } = await loadCatalog(); abort(signal);
       const result = structuredClone(descriptor);
-      const latest = [...new Set(data.rows.map(row => String(row.season)))].sort().at(-1);
-      const sessions = new Set(data.rows.map(row => row.session));
+      const latest = catalog.filter(item => item.counts.results || item.counts.sprint).map(item => item.partitionId).sort().at(-1);
       const visualization = result.presentation!.defaultVisualization!;
       result.presentation!.views = [];
-      if (sessions.size > 0) result.presentation!.views.push({ id: 'events', label: text('Event results', 'Resultados dos eventos'), filters: [structuredClone(allSessionFilter)], visualization });
-      if (sessions.has('results')) result.presentation!.views.push({ id: 'race', label: text('Race results', 'Resultados de corrida'), filters: [{ fieldId: 'session', op: 'in', values: ['results'] }], visualization: { ...visualization, unifyEvents: false } });
-      if (sessions.has('sprint')) result.presentation!.views.push({ id: 'sprint', label: text('Sprint results', 'Resultados de sprint'), filters: [{ fieldId: 'session', op: 'in', values: ['sprint'] }], visualization: { ...visualization, unifyEvents: false } });
-      if (data.rows.some(row => row.team !== null)) result.presentation!.views.push({ id: 'teams', label: text('Points by team', 'Pontuação por equipe'), filters: [structuredClone(allSessionFilter)], visualization: { ...visualization, series: 'team' } });
+      if (latest) result.presentation!.views.push({ id: 'events', label: text('Event results', 'Resultados dos eventos'), filters: [structuredClone(allSessionFilter)], visualization });
+      if (catalog.some(item => item.counts.results)) result.presentation!.views.push({ id: 'race', label: text('Race results', 'Resultados de corrida'), filters: [{ fieldId: 'session', op: 'in', values: ['results'] }], visualization: { ...visualization, unifyEvents: false } });
+      if (catalog.some(item => item.counts.sprint)) result.presentation!.views.push({ id: 'sprint', label: text('Sprint results', 'Resultados de sprint'), filters: [{ fieldId: 'session', op: 'in', values: ['sprint'] }], visualization: { ...visualization, unifyEvents: false } });
+      if (catalog.some(item => item.hasTeams ?? Boolean(item.counts.results || item.counts.sprint))) result.presentation!.views.push({ id: 'teams', label: text('Points by team', 'Pontuação por equipe'), filters: [structuredClone(allSessionFilter)], visualization: { ...visualization, series: 'team' } });
       result.presentation!.defaultFilters = [...(latest ? [{ fieldId: 'season', op: 'in' as const, values: [latest] }] : []), structuredClone(allSessionFilter)];
       assertDataset(result); return result;
     },
     async resolveSelection(request: SelectionRequest, signal) {
       abort(signal); if (request.protocolVersion !== 1 || request.datasetId !== descriptor.id || !Array.isArray(request.partitionIds) || !['latest', 'pinned'].includes(request.policy)) throw new SandboxError('REVISION_MISSING', 'Selection unavailable');
-      let data: NonNullable<typeof frozen>;
+      let pinnedKey: string | undefined;
       if (request.policy === 'pinned') {
         if (!request.revisions?.length || request.revisions.length > 151 || JSON.stringify([...request.partitionIds].sort()) !== JSON.stringify(request.revisions.map(r => r.partitionId).sort())) throw new SandboxError('REVISION_MISSING', 'Invalid revisions');
-        data = [...selections.values()].find(s => JSON.stringify(s.selection.revisions) === JSON.stringify(request.revisions)) ?? await project(await read(request.revisions));
-        abort(signal);
-        if (JSON.stringify(data.selection.revisions) !== JSON.stringify(request.revisions)) throw new SandboxError('REVISION_MISSING', 'Revision mismatch');
+        pinnedKey = revisionKey(request.revisions);
+        const existing = [...selections.values()].find(s => revisionKey(s.selection.revisions) === pinnedKey);
+        if (existing) { rememberSelection(existing); return structuredClone(existing.selection); }
       } else {
         if (request.revisions !== undefined || request.partitionIds.length > 151 || new Set(request.partitionIds).size !== request.partitionIds.length || request.partitionIds.some(id => !/^(19[5-9]\d|20\d\d|2100)$/.test(id))) throw new SandboxError('INVALID_CONTRACT', 'Invalid partitions');
-        const snapshots = await read(); abort(signal);
-        const scoped = request.partitionIds.length ? snapshots.filter(s => request.partitionIds.includes(String(s.year))) : snapshots;
-        if (request.partitionIds.length && scoped.length !== request.partitionIds.length) throw new SandboxError('REVISION_MISSING', 'Partition unavailable');
-        const candidate = await project(scoped);
-        data = [...selections.values()].find(s => JSON.stringify(s.selection.revisions) === JSON.stringify(candidate.selection.revisions)) ?? candidate;
       }
-      if (!selections.has(data.selection.token) && selections.size >= 8) throw new SandboxError('LIMIT_EXCEEDED', 'Too many open revisions');
-      selections.set(data.selection.token, data);
+      const { catalog, snapshots } = await loadCatalog(request.revisions);
+      abort(signal);
+      const scoped = request.policy === 'latest' && request.partitionIds.length ? catalog.filter(item => request.partitionIds.includes(item.partitionId)) : catalog;
+      if (request.partitionIds.length && scoped.length !== request.partitionIds.length) throw new SandboxError('REVISION_MISSING', 'Partition unavailable');
+      const revisions = scoped.map(({ partitionId, revisionId, sourceDataAt, storedAt }) => ({ partitionId, revisionId, sourceDataAt, storedAt }));
+      const key = revisionKey(revisions);
+      if (pinnedKey !== undefined && key !== pinnedKey) throw new SandboxError('REVISION_MISSING', 'Revision mismatch');
+      const existing = [...selections.values()].find(s => revisionKey(s.selection.revisions) === key);
+      const selection: ResolvedSelection = { protocolVersion: 1, datasetId: descriptor.id, token: crypto.randomUUID(), transformationVersion: 'f1-results-1', revisions };
+      assertSelection(selection);
+      const data = existing ?? { selection, catalog: scoped, data: snapshots && project(snapshots.filter(s => revisions.some(r => r.partitionId === String(s.year)))) };
+      rememberSelection(data);
       return structuredClone(data.selection);
     },
     async query(q: QueryRequest, signal) {
@@ -233,7 +286,7 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
         if (!selectedSessions) throw new SandboxError('INVALID_QUERY', 'Unifying events requires an explicit selection of race and sprint sessions.', eventField);
       }
       if (q.window && q.filters.some(f => f.fieldId === 'team')) throw new SandboxError('INVALID_QUERY', 'Team filters cannot be used for cumulative points; remove the team filter.', 'team');
-      const data = selected(q.selection);
+      const data = await selectedRows(selected(q.selection), q.filters, signal);
       let sourceRows = data.rows;
       if (q.window?.scope === 'profile' && q.window.profileId === 'driver-all-sessions-v1') {
         const synthetic: Row[] = [];
@@ -372,8 +425,17 @@ export function createF1AnalysisProvider(read: (revisions?: RevisionReference[])
       abort(signal); const field = descriptor.fields.find(f => f.id === req.fieldId);
       if (req.protocolVersion !== 1 || req.datasetId !== descriptor.id || !field?.filters.includes('in') || req.filters.some(f => f.fieldId === req.fieldId) || typeof req.search !== 'string' || req.search.length > 300 || !Number.isInteger(req.limit) || req.limit < 1 || req.limit > 100 || (req.cursor !== undefined && !/^(0|[1-9]\d{0,5})$/.test(req.cursor))) throw new SandboxError('INVALID_QUERY', 'Invalid facet');
       assertQuery({ protocolVersion: 1, requestId: 'facet', datasetId: descriptor.id, schemaVersion: descriptor.schemaVersion, semanticVersion: descriptor.semanticVersion, selection: req.selection, dimensions: ['season'], metrics: [{ metricId: 'points', aggregation: 'sum' }], filters: req.filters, orderBy: [], limit: 1 }, descriptor);
+       const selection = selected(req.selection);
        const counts = new Map<string | number | boolean, { labels: Set<string>; count: number }>();
-       for (const row of selected(req.selection).rows) {
+       const scopeFromCatalog = field.id === 'season' && req.filters.every(filter => filter.fieldId === 'session');
+       if (scopeFromCatalog) {
+         for (const item of selection.catalog) {
+           const count = (['results', 'sprint'] as const).reduce((total, session) => total + (matches({ session }, req.filters) ? item.counts[session] : 0), 0);
+           if (count) counts.set(item.partitionId, { labels: new Set([item.partitionId]), count });
+         }
+       }
+       const rows = scopeFromCatalog ? [] : (await selectedRows(selection, req.filters, signal)).rows;
+       for (const row of rows) {
          const value = row[req.fieldId]; const label = String(field.labelField ? row[field.labelField] ?? value : value);
          if (value !== null && matches(row, req.filters) && (field.id === 'round' || `${label} ${value}`.toLowerCase().includes(req.search.toLowerCase()))) {
            const item = counts.get(value) ?? { labels: new Set<string>(), count: 0 };

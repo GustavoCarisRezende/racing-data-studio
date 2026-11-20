@@ -64,7 +64,7 @@ Um **snapshot** é uma captura local de uma temporada. A lista apresenta captura
 
 Nomes são aparados e aceitam até **80 caracteres**, sem caracteres de controle; devem ser únicos na temporada, sem diferenciar maiúsculas de minúsculas. O nome automático `Snapshot #<ID>` é reservado. Confirmar o próprio nome automático sem nome personalizado não altera os metadados.
 
-**Antes de excluir:** análises antigas podem depender de uma captura específica. A exclusão não verifica essas referências e pode impedir que a análise seja reaberta. Uma captura no mesmo banco não é uma cópia externa independente.
+**Antes de excluir:** se houver análises legadas vinculadas à captura, o diálogo lista seus nomes. Confirmar exclui o snapshot e as análises listadas. Se a lista mudar, o aplicativo mostra a versão atualizada e pede nova confirmação.
 
 ## Sandbox: filtros e visualizações
 
@@ -114,13 +114,13 @@ Em **Salvar modelo**, quando há um modelo selecionado, escolha atualizá-lo ou 
 
 Os modelos usam a política chamada `latest`: ao abrir, ela resolve os **snapshots ativos** no escopo escolhido, mesmo que sejam históricos. A consulta aberta mantém essa seleção; para usar uma nova seleção ativa, reabra o modelo ou a aba. **Restaurar padrões** adiciona apenas modelos padrão ausentes, sem sobrescrever os existentes. Conflitos de edição são informados em vez de sobrescritos silenciosamente; atualize e reabra a versão atual.
 
-Análises legadas aparecem no gerenciamento e podem ser abertas ou excluídas com confirmação. Elas apontam a snapshots específicos, ao contrário de modelos; excluir as capturas necessárias pode impedir sua abertura. Excluir uma análise ou modelo é permanente.
+Análises legadas aparecem no gerenciamento e podem ser abertas ou excluídas com confirmação. Elas apontam a snapshots específicos. Modelos reutilizáveis resolvem o snapshot ativo ao abrir. O Sandbox pede confirmação ao trocar de aba ou voltar a **Categorias** quando há edições pendentes.
 
 ## Exportar
 
 A exportação exige resultado completo. Em **Tabela**, exporte um **CSV** com todas as linhas filtradas, na ordem e com as colunas visíveis, não só a página atual. Em gráficos de linha, barras, pizza ou dispersão, escolha **SVG** ou **PNG** e as opções de legenda/rótulos oferecidas.
 
-No diálogo de opções de exportação, **Cancelar** fica à esquerda e **Exportar** à direita. Em seguida, escolha destino e nome no seletor do sistema. Cancelar o seletor não salva o arquivo; o aplicativo não sobrescreve silenciosamente um arquivo existente. Não há JPEG nem manifesto separado no fluxo atual. CSV protege textos que possam ser interpretados como fórmulas; células vazias podem representar tanto texto vazio quanto dados ausentes.
+No diálogo de opções de exportação, **Cancelar** fica à esquerda e **Exportar** à direita. Em seguida, escolha destino e nome no seletor do sistema. Cancelar o seletor não salva o arquivo; o aplicativo não sobrescreve silenciosamente um arquivo existente. Marque **Incluir manifesto de proveniência (JSON)** para salvar os filtros, as revisões dos snapshots e as fontes ao lado do CSV, em um arquivo `.manifest.json`. CSV protege textos que possam ser interpretados como fórmulas; células vazias podem representar tanto texto vazio quanto dados ausentes.
 
 ## Receitas rápidas
 
@@ -132,9 +132,11 @@ No diálogo de opções de exportação, **Cancelar** fica à esquerda e **Expor
 
 ## Dados locais, reset e privacidade
 
-Os dados, modelos e snapshots ficam no dispositivo; importar ou atualizar usa rede. No Linux o banco costuma estar em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`. Snapshots ficam no mesmo banco; cópias por evento são suplementares e não restauram o banco.
+Os dados, modelos e snapshots ficam no dispositivo. Importar e atualizar usa rede. No Linux o banco costuma estar em `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, ou sob `$XDG_DATA_HOME/org.racingdatastudio.app`.
 
-O menu de três linhas oferece **Restaurar Configurações Padrão** no desktop. Confirmar prepara reinício e exclusão permanente de dados locais, snapshots, modelos, preferências e armazenamento local do app; cancelar não apaga. Arquivos exportados fora das pastas do aplicativo não são removidos. O reset é nativo e não exige Python. O script `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux; consulte [detalhes e precauções](DESKTOP_USABILITY.md#reset-nativo-e-limpeza-de-desenvolvimento-no-linux) antes de usá-lo.
+Em **Gerenciar snapshots**, use **Criar Backup** para guardar temporadas, snapshots, modelos e análises salvas em um ZIP. O nome sugerido segue o padrão `rds-F1_YYYYMMDDhhmm.zip`, com a data e a hora locais. **Restaurar Backup** aceita o ZIP sem extrair e também abre os backups anteriores em `.sqlite`. O app valida o arquivo e substitui o banco da F1 após confirmação. Guarde o backup fora das pastas do aplicativo. Preferências, imagens exportadas e cópias por evento ficam fora desse backup.
+
+O menu de três linhas oferece **Restaurar Configurações Padrão** no desktop. Confirmar prepara reinício e exclusão permanente de dados locais, snapshots, modelos, preferências e armazenamento local do app; cancelar não apaga. Arquivos exportados fora das pastas do aplicativo não são removidos. Se o reset falhar ao preparar a remoção, o aplicativo recupera os dados movidos. Se falhar ao apagar arquivos antigos após concluir o reset, o aplicativo abre e retoma a limpeza na próxima inicialização. O script `scripts/reset-local-data.py` é ferramenta separada de desenvolvimento Linux; consulte [detalhes e precauções](DESKTOP_USABILITY.md#reset-nativo-e-limpeza-de-desenvolvimento-no-linux) antes de usá-lo.
 
 Dados Jolpica têm [termos próprios](https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md), incluindo atribuição, CC BY-NC-SA 4.0 e uso não comercial. Não envie banco pessoal, credenciais ou dados sensíveis ao relatar problemas; anonimize capturas e logs.
 

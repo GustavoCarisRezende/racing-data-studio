@@ -14,11 +14,12 @@ import { afterYearSelection, afterSyncResult, type TutorialBridge } from '../../
 type LocalSeason = { year: number; importedAt: string | null; dataAt: string | null };
 type Progress = { year: number; phase: string; offset: number };
 type Snapshot = { id: number; name?: string | null; displayName?: string | null; isActive: boolean; canDelete?: boolean; deleteReason?: string | null; importedAt: string; dataAt: string };
+type SnapshotDependent = { id: string; revision: string; title: string };
 type View = 'sandbox' | 'explore' | 'sync' | 'snapshots' | 'source';
 const views: View[] = ['sandbox', 'explore', 'sync', 'snapshots', 'source'];
 const AnalysisScreen = lazy(() => import('./analysis-screen'));
 
-function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutorial?: TutorialBridge }) {
+function F1Screen({ t, locale, tutorial, confirmNavigation }: { t: Translate; locale: Locale; tutorial?: TutorialBridge; confirmNavigation?: (proceed: () => void) => void }) {
   const desktop = isTauri();
   const current = new Date().getFullYear();
   const fallback = Array.from({ length: Math.max(0, Math.min(current, 2100) - 1949) }, (_, i) => 1950 + i);
@@ -39,11 +40,16 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
   const [view, setView] = useState<View | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [pendingDelete, setPendingDelete] = useState<Snapshot | null>(null);
+  const [dependents, setDependents] = useState<SnapshotDependent[] | null>(null);
   const [pendingRestore, setPendingRestore] = useState<Snapshot | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
   const [snapshotName, setSnapshotName] = useState('');
   const [snapshotError, setSnapshotError] = useState<{ snapshotId: number; operation: 'rename' | 'delete'; message: MessageKey } | null>(null);
+  const [backupNotice, setBackupNotice] = useState<'backupSaved' | 'backupRestored' | null>(null);
+  const [backupError, setBackupError] = useState('');
   const deleteDialog = useRef<HTMLDialogElement>(null);
+  const backupDialog = useRef<HTMLDialogElement>(null);
+  const backupCancel = useRef<HTMLButtonElement>(null);
   const initialView = useRef(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const selected = local.find((item) => item.year === year);
@@ -58,6 +64,17 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
     if ((pendingDelete || pendingRestore) && dialog && !dialog.open) dialog.showModal();
     else if (!pendingDelete && !pendingRestore && dialog?.open) dialog.close();
   }, [pendingDelete, pendingRestore]);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    let alive = true;
+    invoke<SnapshotDependent[]>('f1_snapshot_dependents', { year, snapshotId: pendingDelete.id }).then((items) => {
+      if (alive) setDependents(items);
+    }).catch((e: unknown) => {
+      if (alive) setSnapshotError({ snapshotId: pendingDelete.id, operation: 'delete', message: snapshotErrorMessageKey(e, 'delete') });
+    });
+    return () => { alive = false; };
+  }, [year, pendingDelete]);
 
   useEffect(() => {
     if (!desktop) { setCatalogState('fallback'); return; }
@@ -136,32 +153,60 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
     finally { setWorking(false); }
   }
   async function deleteSnapshot() {
-    if (!pendingDelete) return;
+    if (!pendingDelete || !dependents) return;
     setWorking(true); setError(''); setSnapshotError(null);
     try {
-      await invoke('f1_snapshot_delete', { year, snapshotId: pendingDelete.id });
+      await invoke('f1_snapshot_delete', { year, snapshotId: pendingDelete.id, confirmed: dependents });
       setPendingDelete(null); setSnapshotError(null); setRevision((n) => n + 1);
-    } catch (e: unknown) { setSnapshotError({ snapshotId: pendingDelete.id, operation: 'delete', message: snapshotErrorMessageKey(e, 'delete') }); }
+    } catch (e: unknown) {
+      const message = snapshotErrorMessageKey(e, 'delete');
+      setSnapshotError({ snapshotId: pendingDelete.id, operation: 'delete', message });
+      if (message === 'snapshotDependentsChanged') {
+        setDependents(null);
+        setPendingDelete({ ...pendingDelete });
+      }
+    }
+    finally { setWorking(false); }
+  }
+
+  async function backupDatabase(restore: boolean) {
+    backupDialog.current?.close();
+    setWorking(true); setBackupNotice(null); setBackupError('');
+    try {
+      if (await invoke<boolean>('f1_backup_database', { restore })) {
+        setBackupNotice(restore ? 'backupRestored' : 'backupSaved');
+        if (restore) {
+          setSnapshots([]);
+          setDetails(null);
+          setLocalError('');
+          setRevision((n) => n + 1);
+        }
+      }
+    } catch (e: unknown) { setBackupError(String(e)); }
     finally { setWorking(false); }
   }
   function selectTab(item: View) {
     initialView.current = true;
     setView(item); setError(''); setCopied(null); setSnapshotError(null); setRenaming(null); setSnapshotName('');
   }
-  function activateTab(item: View) {
-    selectTab(item);
-    if (item === 'sync' && tutorial?.step === 'sync-tab') tutorial.onStep('sync-content');
-    else if (item === 'snapshots' && tutorial?.step === 'snapshots-tab') tutorial.onStep('snapshots-content');
-    else if (item === 'source' && tutorial?.step === 'source-tab') tutorial.onStep('source-content');
-    else if (item === 'explore' && tutorial?.step === 'explore-tab') tutorial.onStep('explore-content');
-    else if (item === 'sandbox' && tutorial?.step === 'sandbox-tab') tutorial.onStep('models');
+  function activateTab(item: View, focusIndex?: number) {
+    const proceed = () => {
+      selectTab(item);
+      if (focusIndex !== undefined) tabRefs.current[focusIndex]?.focus();
+      if (item === 'sync' && tutorial?.step === 'sync-tab') tutorial.onStep('sync-content');
+      else if (item === 'snapshots' && tutorial?.step === 'snapshots-tab') tutorial.onStep('snapshots-content');
+      else if (item === 'source' && tutorial?.step === 'source-tab') tutorial.onStep('source-content');
+      else if (item === 'explore' && tutorial?.step === 'explore-tab') tutorial.onStep('explore-content');
+      else if (item === 'sandbox' && tutorial?.step === 'sandbox-tab') tutorial.onStep('models');
+    };
+    if (view === 'sandbox' && item !== view && confirmNavigation) confirmNavigation(proceed);
+    else proceed();
   }
   function navigateTabs(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     const target = nextTabIndex(event.key, index, views.length);
     if (target === null) return;
     event.preventDefault();
-    activateTab(views[target]);
-    tabRefs.current[target]?.focus();
+    activateTab(views[target], target);
   }
   const phase = progress?.phase === 'races' ? t('phaseRaces') : progress?.phase === 'results' ? t('phaseResults') : progress?.phase === 'sprint' ? t('phaseSprint') : progress?.phase === 'saving' ? t('phaseSaving') : t('phaseStarting');
   const deleteReasonText = (reason?: string | null) => reason === 'ACTIVE_SNAPSHOT' ? t('activeCannotDelete') : reason === 'PINNED_BY_ANALYSIS' ? t('pinnedCannotDelete') : reason === 'REFERENCE_CHECK_FAILED' ? t('deleteCheckFailed') : t('deleteSnapshot');
@@ -208,8 +253,31 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
          : <p aria-live="polite">{progress ? `${local.some((entry) => entry.year === progress.year && entry.importedAt) ? t('updating') : t('importing')} ${progress.year}: ${phase} · ${progress.offset} ${t('offset')}` : working ? t('loading') : imported ? `${t('imported')} · ${t('lastImport')}: ${formatTimestamp(selected?.importedAt, locale)}` : t('notImported')}</p>}
         {error && <div className="sync-error" role="alert"><strong>{t(errorKind === 'sync' ? 'syncError' : errorKind === 'restore' ? 'restoreError' : errorKind === 'activate' ? 'activateError' : 'copyError')}</strong><details><summary>{t('retryDetails')}</summary><pre>{error}</pre></details></div>}
       {view === 'explore' && <>{!imported && <p>{t('noLocal')}</p>}{imported && !details && !localError && <p>{t('loading')}</p>}{details && imported && selected?.dataAt && <Explore t={t} locale={locale} year={year} details={details} importedAt={selected.dataAt} />}</>}
-       {view === 'snapshots' && <><details className="snapshot-help"><summary>{t('snapshotHelpTitle')}</summary><p>{t('snapshotHelpDatabase')}</p><p>{t('snapshotHelpEvents')}</p><p>{t('snapshotHelpSafety')}</p></details>{copied !== null && <p role="status">{t('copySuccess')} {copied}</p>}{snapshots.length === 0 ? <p>{t('noSnapshots')}</p> : <ul className="snapshot-list">{snapshots.map((snapshot) => <li key={snapshot.id}>
-          <div className="snapshot-info"><strong>{snapshot.displayName || snapshot.name || `#${snapshot.id}`}</strong><span>#{snapshot.id} · {formatTimestamp(snapshot.importedAt, locale)}{snapshot.dataAt !== snapshot.importedAt ? ` · ${t('sourceDataAt')}: ${formatTimestampUtc(snapshot.dataAt, locale)}` : ''}{snapshot.isActive && <span className="snapshot-active">{t('activeSnapshot')}</span>}{snapshot.deleteReason ? ` · ${deleteReasonText(snapshot.deleteReason)}` : ''}</span></div>
+       {view === 'snapshots' && <><details className="snapshot-help"><summary>{t('snapshotHelpTitle')}</summary><p>{t('snapshotHelpDatabase')}</p><p>{t('snapshotHelpEvents')}</p><p>{t('snapshotHelpSafety')}</p></details>
+         <div className="snapshot-actions">
+           <button type="button" disabled={active} onClick={() => void backupDatabase(false)}>{t('backupCreate')}</button>
+           <button type="button" disabled={active} onClick={() => { backupDialog.current?.showModal(); backupCancel.current?.focus(); }}>{t('backupRestore')}</button>
+         </div>
+         <dialog ref={backupDialog} className="confirm-dialog" aria-labelledby="backup-restore-title">
+           <h2 id="backup-restore-title">{t('backupRestore')}</h2>
+           <p>{t('backupRestoreWarning')}</p>
+           <div>
+             <button className="danger" type="button" disabled={active} onClick={() => void backupDatabase(true)}>{t('backupRestore')}</button>
+             <button ref={backupCancel} type="button" onClick={() => backupDialog.current?.close()}>{t('cancel')}</button>
+           </div>
+         </dialog>
+         {backupNotice && <p role="status">{t(backupNotice)}</p>}
+         {backupError && <div className="sync-error" role="alert">{t('backupError')} <details><summary>{t('retryDetails')}</summary><pre>{backupError}</pre></details></div>}
+         {copied !== null && <p role="status">{t('copySuccess')} {copied}</p>}{snapshots.length === 0 ? <p>{t('noSnapshots')}</p> : <ul className="snapshot-list">{snapshots.map((snapshot) => <li key={snapshot.id}>
+          <div className="snapshot-info">
+            <strong>{snapshot.displayName || snapshot.name || `#${snapshot.id}`}</strong>
+            <span>
+              #{snapshot.id} · {formatTimestamp(snapshot.importedAt, locale)}
+              {snapshot.dataAt !== snapshot.importedAt ? ` · ${t('sourceDataAt')}: ${formatTimestampUtc(snapshot.dataAt, locale)}` : ''}
+              {snapshot.isActive && <>{' '}<span className="snapshot-active">{t('activeSnapshot')}</span></>}
+              {snapshot.deleteReason ? ` · ${deleteReasonText(snapshot.deleteReason)}` : ''}
+            </span>
+          </div>
            <SnapshotActions snapshot={snapshot} active={active} renaming={renaming === snapshot.id} snapshotName={snapshotName} snapshotError={snapshotError} t={t} deleteReasonText={deleteReasonText}
             onRename={() => { setSnapshotError(null); setRenaming(snapshot.id); setSnapshotName(snapshot.displayName || snapshot.name || ''); }}
             onNameChange={(value) => { setSnapshotName(value); if (snapshotError?.snapshotId === snapshot.id && snapshotError.operation === 'rename') setSnapshotError(null); }}
@@ -217,9 +285,23 @@ function F1Screen({ t, locale, tutorial }: { t: Translate; locale: Locale; tutor
             onSaveRename={(event) => { event.preventDefault(); void renameSnapshot(snapshot); }}
             onCopyEvents={() => void copyEvents(snapshot.id)} onRestore={() => setPendingRestore(snapshot)}
             onActivate={() => void activateSnapshot(snapshot)}
-            onDelete={() => { setSnapshotError(null); setPendingDelete(snapshot); }} />
+            onDelete={() => { setSnapshotError(null); setDependents(null); setPendingDelete(snapshot); }} />
        </li>)}</ul>}
-         <dialog ref={deleteDialog} className="confirm-dialog" aria-labelledby="snapshot-confirm-title" onCancel={(event) => { event.preventDefault(); if (!active) { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); } }}><h2 id="snapshot-confirm-title">{pendingRestore ? t('restore') : t('deleteSnapshot')}</h2><p>{pendingRestore ? t('restoreConfirm') : t('deleteSnapshotConfirm')}</p>{pendingRestore && errorKind === 'restore' && error && <p className="snapshot-inline-error" role="alert">{t('restoreError')} {error}</p>}{snapshotError?.operation === 'delete' && snapshotError.snapshotId === pendingDelete?.id && <p className="snapshot-inline-error" role="alert">{t(snapshotError.message)}</p>}<div><button className={pendingRestore ? '' : 'danger'} type="button" disabled={active} onClick={() => pendingRestore ? void restore(pendingRestore.id) : void deleteSnapshot()}>{pendingRestore ? t('restore') : t('deleteSnapshot')}</button><button type="button" disabled={active} onClick={() => { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); }}>{t('cancel')}</button></div></dialog>
+         <dialog ref={deleteDialog} className="confirm-dialog" aria-labelledby="snapshot-confirm-title" onCancel={(event) => { event.preventDefault(); if (!active) { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); } }}>
+           <h2 id="snapshot-confirm-title">{pendingRestore ? t('restore') : t('deleteSnapshot')}</h2>
+           <p>{pendingRestore ? t('restoreConfirm') : t('deleteSnapshotConfirm')}</p>
+           {pendingDelete && dependents === null && !snapshotError && <p role="status">{t('loading')}</p>}
+           {pendingDelete && Boolean(dependents?.length) && <>
+             <p>{t('snapshotDeleteDependents')}</p>
+             <ul>{dependents?.map(({ id, title }) => <li key={id}>{title}</li>)}</ul>
+           </>}
+           {pendingRestore && errorKind === 'restore' && error && <p className="snapshot-inline-error" role="alert">{t('restoreError')} {error}</p>}
+           {snapshotError?.operation === 'delete' && snapshotError.snapshotId === pendingDelete?.id && <p className="snapshot-inline-error" role="alert">{t(snapshotError.message)}</p>}
+           <div>
+             <button className={pendingRestore ? '' : 'danger'} type="button" disabled={active || (!pendingRestore && !dependents)} onClick={() => pendingRestore ? void restore(pendingRestore.id) : void deleteSnapshot()}>{pendingRestore ? t('restore') : t('deleteSnapshot')}</button>
+             <button type="button" disabled={active} onClick={() => { setSnapshotError(null); setPendingDelete(null); setPendingRestore(null); }}>{t('cancel')}</button>
+           </div>
+         </dialog>
        </>}
       </>}
       {localError && <div className="sync-error" role="alert">{t('loadError')} <details><summary>{t('retryDetails')}</summary><pre>{localError}</pre></details></div>}

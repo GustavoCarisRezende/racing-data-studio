@@ -14,6 +14,7 @@
     "allow-f1-sync-status",
     "allow-f1-local-seasons",
     "allow-f1-analysis-snapshots",
+    "allow-f1-analysis-catalog",
     "allow-f1-analysis-pinned",
     "allow-f1-analyses-list",
     "allow-f1-analysis-load",
@@ -31,12 +32,15 @@
     "allow-f1-season-details",
     "allow-f1-remote-seasons",
     "allow-f1-snapshots",
+    "allow-f1-backup-database",
     "allow-f1-restore-snapshot",
     "allow-f1-copy-snapshot-events",
     "allow-f1-snapshot-rename",
     "allow-f1-snapshot-activate",
     "allow-f1-snapshot-delete",
+    "allow-f1-snapshot-dependents",
     "allow-reset-application",
+    "allow-reset-status",
     "allow-open-github",
     "allow-toggle-fullscreen"
   ]

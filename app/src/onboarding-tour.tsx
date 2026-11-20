@@ -4,6 +4,10 @@ import type { TutorialAction, TutorialCornerRadii, TutorialRect, TutorialState, 
 import { afterSyncExplanation, tutorialCornerRadii, tutorialCutoutPath, tutorialRect, tutorialShields } from './onboarding';
 
 type Definition = { target?: string; en: [string, string]; pt: [string, string] };
+const backupNote: Record<Locale, string> = {
+  'en-US': 'In the desktop app, choose Create backup to keep a ZIP you can restore if you lose your data. If you share it, credit Jolpica F1 and follow the data license (CC BY-NC-SA 4.0).',
+  'pt-BR': 'No desktop, use Criar Backup para guardar um ZIP e recuperar os dados em caso de perda. Se compartilhar o arquivo, dê crédito à Jolpica F1 e respeite a licença dos dados (CC BY-NC-SA 4.0).',
+};
 const copy: Record<TutorialStep, Definition> = {
   welcome: { en: ['Welcome to Racing Data Studio', 'A local-first workspace for exploring motorsport data. Choose a category, inspect its data source, explore reported results, then build an analysis in the Sandbox.'], pt: ['Boas-vindas ao Racing Data Studio', 'Um espaço local para explorar dados de automobilismo. Escolha uma categoria, confira a fonte dos dados, explore resultados informados e monte uma análise no Sandbox.'] },
   category: { target: 'category-f1', en: ['Choose a category', 'Each category is an independent module with its own source, rules, and local data. Formula 1 is available in this workspace.'], pt: ['Escolha uma categoria', 'Cada categoria é um módulo independente, com fonte, regras e dados locais próprios. Fórmula 1 está disponível neste espaço.'] },
@@ -208,7 +212,8 @@ export function OnboardingTour({ state, locale, dispatch, targetElement, onMissi
     <button className="tutorial-skip-fixed" type="button" onClick={() => dispatch({ type: 'skip' })}>{locale === 'pt-BR' ? 'Pular tutorial' : 'Skip tutorial'}</button>
     <section ref={cardRef} className={`tutorial-card tutorial-arrow-${position.arrow}`} role="dialog" aria-modal="false" aria-labelledby="tutorial-title" aria-describedby="tutorial-copy" style={{ top: position.top, left: position.left }}>
       <div className="tutorial-card-head"><span>{locale === 'pt-BR' ? `Etapa ${index + 1} de ${ordered.length}` : `Step ${index + 1} of ${ordered.length}`}</span></div>
-      <h2 id="tutorial-title" ref={titleRef} tabIndex={-1}>{stageText[0]}</h2><p id="tutorial-copy">{stageText[1]}</p>
+      <h2 id="tutorial-title" ref={titleRef} tabIndex={-1}>{stageText[0]}</h2>
+      <p id="tutorial-copy">{stageText[1]}{state.step === 'snapshots-content' && ` ${backupNote[locale]}`}</p>
       {missing && <p className="tutorial-target-missing" role="status">{locale === 'pt-BR' ? 'Este controle não está disponível nesta tela. Você pode continuar sem alterar os dados.' : 'This control is not available on this screen. You can continue without changing data.'}</p>}
       <div className="tutorial-actions">
         {targetNode && <button type="button" className="tutorial-secondary" onClick={() => targetRef.current?.focus()}>{locale === 'pt-BR' ? 'Focar controle' : 'Focus control'}</button>}

@@ -57,7 +57,8 @@ function QuickFacet({ descriptor, selection, provider, field, label, filters, on
 }) {
   const uid = useId();
   const [search, setSearch] = useState('');
-  const options = useFacetOptions(provider, descriptor, selection, field, filters, open, search);
+  const facetFilters = descriptor.capabilities.multiSelection?.fieldId === field.id ? [] : filters;
+  const options = useFacetOptions(provider, descriptor, selection, field, facetFilters, open, search);
   const filter = filters.find(f => f.fieldId === field.id);
   const chosen = filter?.op === 'in' ? filter.values : [];
   const maximum = descriptor.capabilities.multiSelection?.fieldId === field.id ? descriptor.capabilities.multiSelection.maxValues : 200;

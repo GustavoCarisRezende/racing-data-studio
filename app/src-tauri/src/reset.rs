@@ -8,9 +8,26 @@ use tauri::Manager;
 
 const APP_ID: &str = "org.racingdatastudio.app";
 const MARKER_NAME: &str = ".org.racingdatastudio.app.reset-pending";
+const CLEANUP_NAME: &str = ".org.racingdatastudio.app.reset-cleanup";
+const STAGED_NAME: &str = ".org.racingdatastudio.app.reset-data";
 const MARKER_CONTENT: &[u8] = b"racing-data-studio-reset-v1\n";
 const MARKER_MAX_BYTES: u64 = 64;
+#[cfg(debug_assertions)]
 const RESTART_FALLBACK_ENV: &str = "RACING_DATA_STUDIO_RESET_RESTART";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResetStatus {
+    Unchanged,
+    Completed,
+    RolledBack,
+    CleanupPending,
+}
+
+#[tauri::command]
+pub fn reset_status(status: tauri::State<'_, ResetStatus>) -> ResetStatus {
+    *status.inner()
+}
 
 /// Development-only handoff to the replacement process. The handoff flag is
 /// consumed before startup continues, so ordinary restarts keep using Vite HMR.
@@ -45,9 +62,16 @@ fn reset_targets(app: &tauri::AppHandle) -> Result<(Vec<PathBuf>, PathBuf), Stri
     #[cfg(target_os = "macos")]
     targets.push(resolver.app_log_dir().map_err(|e| e.to_string())?);
 
-    let mut validated = Vec::new();
+    let mut validated = Vec::<PathBuf>::new();
     for target in targets {
         validate_app_root(&target)?;
+        let existing = target.ancestors().find(|path| path.exists())
+            .ok_or("RESET_UNSUPPORTED: não foi possível resolver o diretório de dados")?;
+        let target = existing.canonicalize().map_err(|e| e.to_string())?
+            .join(target.strip_prefix(existing).map_err(|e| e.to_string())?);
+        if validated.iter().any(|root| root != &target && (root.starts_with(&target) || target.starts_with(root))) {
+            return Err("RESET_UNSUPPORTED: diretórios de dados sobrepostos".into());
+        }
         if !validated.contains(&target) {
             validated.push(target);
         }
@@ -127,13 +151,23 @@ fn create_marker(marker: &Path) -> Result<(), String> {
         .create_new(true)
         .open(marker)
         .map_err(|e| format!("RESET_FAILED: não foi possível preparar a restauração: {e}"))?;
-    if let Err(error) = file.write_all(MARKER_CONTENT).and_then(|_| file.sync_all()) {
+    if let Err(error) = file.write_all(MARKER_CONTENT).and_then(|_| file.sync_all()).and_then(|_| sync_parent(marker)) {
         drop(file);
         let _ = fs::remove_file(marker);
         return Err(format!(
             "RESET_FAILED: não foi possível preparar a restauração: {error}"
         ));
     }
+    Ok(())
+}
+
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -152,12 +186,17 @@ pub fn reset_application(
         crate::dev_assets::DevelopmentAssets::from_dist(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../dist"),
         )?;
-        let data_dir = targets
-            .iter()
-            .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(APP_ID))
-            .ok_or_else(|| "RESET_UNSUPPORTED: diretório de dados indisponível".to_string())?;
-        let lock = crate::f1::commands::acquire_file_lock(data_dir)
+        let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let lock = crate::f1::commands::acquire_file_lock(&data_dir)
             .map_err(|_| "RESET_BUSY".to_string())?;
+        if marker_is_pending(&marker.with_file_name(CLEANUP_NAME))? {
+            return Err("RESET_BUSY: a limpeza anterior está pendente".into());
+        }
+        for target in &targets {
+            if reset_directory_exists(&target.with_file_name(STAGED_NAME))? {
+                return Err("RESET_BUSY: há dados de uma restauração pendente".into());
+            }
+        }
         create_marker(&marker)?;
         // Keep the lock until this process exits. Tauri spawns the replacement
         // immediately before exiting, so startup allows a bounded handover.
@@ -175,22 +214,25 @@ pub fn reset_application(
 }
 
 /// Called during Tauri setup, before the repository or WebView database opens.
-pub fn apply_pending_reset(app: &tauri::AppHandle) -> Result<(), String> {
+pub fn apply_pending_reset(app: &tauri::AppHandle) -> Result<ResetStatus, String> {
     let marker = marker_path(app)?;
-    if !marker_is_pending(&marker)? {
-        return Ok(());
+    let pending = marker_is_pending(&marker)?;
+    if !pending && !marker_is_pending(&marker.with_file_name(CLEANUP_NAME))? {
+        return Ok(ResetStatus::Unchanged);
     }
 
     let (targets, marker) = reset_targets(app)?;
-    // Validate every target before deleting any of them.
-    for target in &targets {
-        validate_app_root(target)?;
-    }
     // The lock is outside every reset target, so deleting the data roots
     // cannot unlink the inode and allow another process to start a sync.
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let _sync_lock = wait_for_restart_lock(&data_dir)?;
-    apply_reset_targets(&targets, &marker).map(|_| ())
+    let _sync_lock = if pending {
+        wait_for_restart_lock(&data_dir)?
+    } else if let Ok(lock) = crate::f1::commands::acquire_file_lock(&data_dir) {
+        lock
+    } else {
+        return Ok(ResetStatus::CleanupPending);
+    };
+    apply_reset_targets(&targets, &marker)
 }
 
 fn wait_for_restart_lock(data_dir: &Path) -> Result<File, String> {
@@ -225,29 +267,85 @@ fn marker_is_pending(marker: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-fn apply_reset_targets(targets: &[PathBuf], marker: &Path) -> Result<bool, String> {
-    if !marker_is_pending(marker)? {
-        return Ok(false);
+fn reset_directory_exists(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("RESET_FAILED: {error}")),
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(format!("RESET_FAILED: caminho inesperado ({})", path.display()))
+        }
+        Ok(_) => Ok(true),
     }
-    // Validate every target before deleting any of them.
+}
+
+fn apply_reset_targets(targets: &[PathBuf], marker: &Path) -> Result<ResetStatus, String> {
+    let cleanup = marker.with_file_name(CLEANUP_NAME);
+    let cleaning = marker_is_pending(&cleanup)?;
+    let pending = marker_is_pending(marker)?;
+    if !pending && !cleaning {
+        return Ok(ResetStatus::Unchanged);
+    }
+    if pending && cleaning {
+        return Err("RESET_FAILED: foram encontrados dois marcadores de restauração".into());
+    }
     for target in targets {
         validate_app_root(target)?;
+        reset_directory_exists(&target.with_file_name(STAGED_NAME))?;
     }
-    for target in targets {
-        match fs::symlink_metadata(&target) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("RESET_FAILED: {}", error)),
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err("RESET_FAILED: diretório de dados mudou durante a restauração".into())
+
+    if pending {
+        // Until the marker moves, every rename can be reversed or resumed after a crash.
+        let stage = || -> Result<(), String> {
+            for target in targets {
+                let staged = target.with_file_name(STAGED_NAME);
+                if !reset_directory_exists(target)? {
+                    continue;
+                }
+                if reset_directory_exists(&staged)? {
+                    return Err(format!("RESET_FAILED: o diretório de dados voltou a existir ({})", target.display()));
+                }
+                fs::rename(target, &staged).and_then(|_| sync_parent(&staged)).map_err(|e| e.to_string())?;
             }
-            Ok(_) => {}
+            fs::rename(marker, &cleanup).map_err(|e| e.to_string())
+        };
+        if let Err(error) = stage() {
+            for target in targets.iter().rev() {
+                let staged = target.with_file_name(STAGED_NAME);
+                if reset_directory_exists(&staged)? {
+                    if reset_directory_exists(target)? {
+                        return Err(format!("RESET_FAILED: não foi possível recuperar {} ({error})", target.display()));
+                    }
+                    fs::rename(&staged, target).and_then(|_| sync_parent(target))
+                        .map_err(|e| format!("RESET_FAILED: não foi possível recuperar {} ({e})", target.display()))?;
+                }
+            }
+            fs::remove_file(marker).and_then(|_| sync_parent(marker)).map_err(|e| e.to_string())?;
+            eprintln!("Reset cancelled and staged data restored: {error}");
+            return Ok(ResetStatus::RolledBack);
         }
-        fs::remove_dir_all(&target)
-            .map_err(|e| format!("RESET_FAILED: não foi possível limpar os dados do app: {e}"))?;
+        if let Err(error) = sync_parent(&cleanup) {
+            eprintln!("Reset cleanup deferred: {error}");
+            return Ok(ResetStatus::CleanupPending);
+        }
     }
-    fs::remove_file(marker)
-        .map_err(|e| format!("RESET_FAILED: não foi possível finalizar a restauração: {e}"))?;
-    Ok(true)
+
+    // The app can use fresh directories even if removing the old contents fails.
+    let remove_staged = || -> Result<(), String> {
+        for target in targets {
+            let staged = target.with_file_name(STAGED_NAME);
+            if reset_directory_exists(&staged)? {
+                fs::remove_dir_all(&staged).and_then(|_| sync_parent(&staged)).map_err(|e| e.to_string())?;
+            }
+        }
+        fs::remove_file(&cleanup).map_err(|e| e.to_string())
+    };
+    match remove_staged() {
+        Ok(()) => Ok(ResetStatus::Completed),
+        Err(error) => {
+            eprintln!("Reset cleanup deferred: {error}");
+            Ok(ResetStatus::CleanupPending)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -280,23 +378,76 @@ mod tests {
         fs::write(config_root.join("settings.json"), b"fixture").unwrap();
         fs::write(&sibling, b"preserve").unwrap();
 
-        assert!(!apply_reset_targets(
+        assert_eq!(apply_reset_targets(
             &[data_root.clone(), config_root.clone()],
             &marker
         )
-        .unwrap());
+        .unwrap(), ResetStatus::Unchanged);
         fs::write(&marker, b"not-a-reset-marker").unwrap();
         assert!(apply_reset_targets(&[data_root.clone(), config_root.clone()], &marker).is_err());
         assert!(data_root.exists());
         assert!(config_root.exists());
 
         fs::write(&marker, MARKER_CONTENT).unwrap();
-        assert!(apply_reset_targets(&[data_root.clone(), config_root.clone()], &marker).unwrap());
+        assert_eq!(apply_reset_targets(&[data_root.clone(), config_root.clone()], &marker).unwrap(), ResetStatus::Completed);
         assert!(!data_root.exists());
         assert!(!config_root.exists());
         assert!(!marker.exists());
         assert_eq!(fs::read(&sibling).unwrap(), b"preserve");
-        assert!(!apply_reset_targets(&[data_root, config_root], &marker).unwrap());
+        assert_eq!(apply_reset_targets(&[data_root, config_root], &marker).unwrap(), ResetStatus::Unchanged);
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn startup_resumes_a_reset_after_one_directory_has_already_moved() {
+        let base = fixture_root();
+        let data = base.join("data").join(APP_ID);
+        let cache = base.join("cache").join(APP_ID);
+        let marker = base.join(MARKER_NAME);
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&cache).unwrap();
+        create_marker(&marker).unwrap();
+        fs::rename(&data, data.with_file_name(STAGED_NAME)).unwrap();
+        assert_eq!(apply_reset_targets(&[data.clone(), cache.clone()], &marker).unwrap(), ResetStatus::Completed);
+        assert!(!data.exists() && !cache.exists());
+        assert!(!data.with_file_name(STAGED_NAME).exists());
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_failure_distinguishes_rollback_from_deferred_cleanup() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = fixture_root();
+        let data = base.join("data").join(APP_ID);
+        let cache = base.join("cache").join(APP_ID);
+        let cache_parent = cache.parent().unwrap();
+        let marker = base.join(MARKER_NAME);
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(data.join("db.sqlite"), b"original").unwrap();
+        fs::write(cache.join("webview"), b"old").unwrap();
+        fs::set_permissions(cache_parent, fs::Permissions::from_mode(0o555)).unwrap();
+        if File::create(cache_parent.join("privilege-check")).is_ok() {
+            fs::set_permissions(cache_parent, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::remove_dir_all(&base).unwrap();
+            return;
+        }
+        create_marker(&marker).unwrap();
+        assert_eq!(apply_reset_targets(&[data.clone(), cache.clone()], &marker).unwrap(), ResetStatus::RolledBack);
+        assert_eq!(fs::read(data.join("db.sqlite")).unwrap(), b"original");
+        assert!(!marker.exists());
+
+        fs::set_permissions(cache_parent, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o555)).unwrap();
+        create_marker(&marker).unwrap();
+        assert_eq!(apply_reset_targets(&[data.clone(), cache.clone()], &marker).unwrap(), ResetStatus::CleanupPending);
+        assert!(!data.exists() && !cache.exists());
+        fs::create_dir(&data).unwrap();
+        fs::write(data.join("db.sqlite"), b"new").unwrap();
+        fs::set_permissions(cache.with_file_name(STAGED_NAME), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(apply_reset_targets(&[data.clone(), cache], &marker).unwrap(), ResetStatus::Completed);
+        assert_eq!(fs::read(data.join("db.sqlite")).unwrap(), b"new");
         fs::remove_dir_all(&base).unwrap();
     }
 

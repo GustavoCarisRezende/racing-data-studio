@@ -64,7 +64,7 @@ A **snapshot** is a local capture of a season. The list shows newest snapshots f
 
 Names are trimmed and accept up to **80 characters**, without control characters; they must be unique within a season, case-insensitively. The automatic name `Snapshot #<ID>` is reserved. Confirming the snapshot's own automatic name without a custom name does not change metadata.
 
-**Before deleting:** older analyses may depend on a specific snapshot. Deletion does not check those references and may prevent reopening the analysis. A snapshot in the same database is not an independent external copy.
+**Before deleting:** the dialog names any legacy analyses linked to the snapshot. Confirming deletes the snapshot and the listed analyses. If the list changes, the app shows the updated list and asks again.
 
 ## Sandbox: filters and visualizations
 
@@ -114,13 +114,13 @@ In **Save template**, when a template is selected, choose whether to update it o
 
 Templates use the `latest` policy: on opening, it resolves **active snapshots** in the chosen scope, even when historical. The open query retains that selection; to use a newly active selection, reopen the template or tab. **Restore defaults** adds only missing default templates without overwriting existing ones. Edit conflicts are reported rather than silently overwritten; refresh and reopen the current version.
 
-Legacy analyses appear in management and can be opened or deleted with confirmation. Unlike templates, they point to specific snapshots; deleting needed snapshots may prevent opening them. Deleting an analysis or template is permanent.
+Legacy analyses appear in management and can be opened or deleted with confirmation. They pin specific snapshots. Reusable templates resolve active snapshots when opened. The Sandbox asks for confirmation when you switch tabs or return to **Categories** with unsaved changes.
 
 ## Exporting
 
 Export requires a complete result. In **Table**, export a **CSV** with all filtered rows in order and visible columns, not just the current page. For line, bar, pie or scatter charts, choose **SVG** or **PNG** and the offered legend/label options.
 
-In the export options dialog, **Cancel** is on the left and **Export** on the right. Then choose destination and name in the system picker. Canceling the picker does not save a file; the application does not silently overwrite an existing file. The current flow has no JPEG or separate manifest. CSV protects text that could be interpreted as formulas; empty cells may represent either empty text or missing data.
+Select **Include provenance manifest (JSON)** to save filters, snapshot revisions and data sources alongside the CSV in a `.manifest.json` file. Choose destination and name in the system picker. Canceling the picker saves nothing, and existing files are protected from replacement. CSV protects text that could be interpreted as formulas. Empty cells can represent both empty text and missing data.
 
 ## Quick recipes
 
@@ -132,9 +132,11 @@ In the export options dialog, **Cancel** is on the left and **Export** on the ri
 
 ## Local data, reset and privacy
 
-Data, templates and snapshots remain on the device; importing or updating uses the network. On Linux the database is normally at `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, or under `$XDG_DATA_HOME/org.racingdatastudio.app`. Snapshots share the database; per-event copies are supplemental and do not restore it.
+Data, templates and snapshots remain on the device. Importing and updating use the network. On Linux the database is normally at `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite`, or under `$XDG_DATA_HOME/org.racingdatastudio.app`.
 
-The three-line desktop menu offers **Restore Default Settings**. Confirming prepares a restart and permanent deletion of local data, snapshots, templates, preferences and application local storage; canceling deletes nothing. Files exported outside application folders are not removed. Reset is native and does not require Python. `scripts/reset-local-data.py` is a separate Linux development tool; see [details and precautions](DESKTOP_USABILITY.md#native-reset-and-linux-development-cleanup) before using it.
+In **Manage snapshots**, choose **Create backup** to save seasons, snapshots, templates and saved analyses in a ZIP file. The suggested name follows `rds-F1_YYYYMMDDhhmm.zip` using the local date and time. **Restore backup** opens the ZIP directly and also accepts older `.sqlite` backups. The app validates the file and replaces the F1 database after confirmation. Store the backup outside the app's folders. Preferences, exported images and per-event copies are outside this backup.
+
+The three-line desktop menu offers **Restore Default Settings**. Confirming restarts the application and permanently deletes local app data, including snapshots, templates, preferences and WebView storage. If reset fails while preparing the removal, the app restores the data it moved. If removing old files fails after the reset commits, the app opens and retries cleanup on the next startup. Files exported outside application folders are kept. [Reset and development cleanup](DESKTOP_USABILITY.md#native-reset-and-linux-development-cleanup)
 
 Jolpica data has [its own terms](https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md), including attribution, CC BY-NC-SA 4.0 and non-commercial use. Do not send personal databases, credentials or sensitive data when reporting problems; anonymize screenshots and logs.
 

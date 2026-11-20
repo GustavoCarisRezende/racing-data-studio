@@ -1,5 +1,12 @@
 export const messages = {
   'en-US': {
+    snapshotDeleteDependents: 'Continuing will also permanently delete these saved analyses linked to this snapshot.',
+    snapshotDependentsChanged: 'The linked analyses have changed. Review the updated list before confirming again.',
+    resetRolledBack: 'The reset could not be completed. Your original data was restored.',
+    resetCleanupPending: 'Default settings are active. Some old files could not be removed yet. Cleanup will be retried when the app opens again.',
+    backupCreate: 'Create backup', backupRestore: 'Restore backup',
+    backupRestoreWarning: 'The selected backup will replace all local F1 seasons, snapshots, models and saved analyses. Back up your current data first if you want to keep it.',
+    backupSaved: 'F1 backup saved.', backupRestored: 'F1 backup restored.', backupError: 'Could not complete the F1 backup operation.',
     language: 'Language', title: 'Racing Data Studio', intro: 'Choose a racing category',
     subtitle: 'Choose a motorsport category to explore its data.',
     search: 'Search categories', noResults: 'No categories found.',
@@ -18,6 +25,13 @@ export const messages = {
     searchYear: 'Search years', noYears: 'No years match your search.', selectYear: 'Select a matching year', onlyMissingSeasons: 'Only seasons not synchronized', missingSeasonsUnavailable: 'Cannot identify unsynchronized seasons until local data is available.', syncInfo: 'Synchronization information', renameSnapshot: 'Rename', snapshotName: 'Snapshot name', renameSnapshotPrompt: 'Enter a display name for this snapshot:', deleteSnapshot: 'Delete snapshot', deleteSnapshotConfirm: 'Delete this snapshot? This cannot be undone.', snapshotRenameError: 'Could not rename snapshot.', snapshotDeleteError: 'Could not delete snapshot.', fullscreenError: 'Could not toggle fullscreen.', save: 'Save', cancel: 'Cancel', activeCannotDelete: 'The active snapshot cannot be deleted.', pinnedCannotDelete: 'This snapshot is used by a saved analysis.', deleteCheckFailed: 'Could not verify whether this snapshot is in use.', snapshotNameConflict: 'A snapshot with this name already exists for this season.', snapshotNameInvalid: 'Enter a non-empty name of up to 80 characters.', snapshotNotFound: 'This snapshot no longer exists. Refresh the list and try again.',
   },
   'pt-BR': {
+    snapshotDeleteDependents: 'Se prosseguir, estas análises salvas vinculadas ao snapshot também serão excluídas permanentemente.',
+    snapshotDependentsChanged: 'As análises vinculadas mudaram. Confira a lista atualizada antes de confirmar novamente.',
+    resetRolledBack: 'A restauração não foi concluída. Seus dados originais foram recuperados.',
+    resetCleanupPending: 'As configurações padrão estão ativas. Alguns arquivos antigos ainda não puderam ser removidos. A limpeza será retomada na próxima abertura.',
+    backupCreate: 'Criar Backup', backupRestore: 'Restaurar Backup',
+    backupRestoreWarning: 'O backup selecionado substituirá todas as temporadas, snapshots, modelos e análises salvas da F1. Faça um backup dos dados atuais se quiser mantê-los.',
+    backupSaved: 'Backup da F1 salvo.', backupRestored: 'Backup da F1 restaurado.', backupError: 'Não foi possível concluir a operação de backup da F1.',
     language: 'Idioma', title: 'Racing Data Studio', intro: 'Escolha uma categoria',
     subtitle: 'Selecione uma categoria de automobilismo para explorar os dados.',
     search: 'Pesquisar categorias', noResults: 'Nenhuma categoria encontrada.',

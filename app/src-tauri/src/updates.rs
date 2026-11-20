@@ -287,4 +287,63 @@ mod tests {
         assert_eq!(count, 4);
         assert!(read_package(&b"oversized"[..], 4, |_| {}).is_err());
     }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    #[ignore = "requires two disposable signed AppImages and their public key"]
+    fn installs_signed_appimage_without_changing_local_data() {
+        use crate::f1::{jolpica::fixtures::season, repository::F1Repository};
+        use std::{env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+        use tauri::test::{mock_builder, mock_context, noop_assets};
+
+        let current_path = PathBuf::from(env::var_os("RDS_SMOKE_CURRENT_APPIMAGE").expect("Set the current AppImage"));
+        let next_path = PathBuf::from(env::var_os("RDS_SMOKE_NEXT_APPIMAGE").expect("Set the next AppImage"));
+        let current_version = env::var("RDS_SMOKE_CURRENT_VERSION").expect("Set the current version");
+        let next_version = env::var("RDS_SMOKE_NEXT_VERSION").expect("Set the next version");
+        let public_key = fs::read_to_string(env::var_os("RDS_SMOKE_UPDATER_KEY").expect("Set the public key path")).unwrap();
+        let signature = fs::read_to_string(next_path.with_extension("AppImage.sig")).unwrap();
+
+        let profile = tempfile::tempdir().unwrap();
+        let installed = profile.path().join("installed.AppImage");
+        fs::copy(current_path, &installed).unwrap();
+        let original = fs::read(&installed).unwrap();
+        assert_eq!(original.get(8..11), Some(b"AI\x02".as_slice()));
+        let package = fs::read(next_path).unwrap();
+        assert_eq!(package.get(8..11), Some(b"AI\x02".as_slice()));
+        let initial_mode = fs::metadata(&installed).unwrap().permissions().mode();
+
+        let mut repository = F1Repository::open(profile.path()).unwrap();
+        repository.save(2024, &season(&[1], &["fixture-driver"])).unwrap();
+        let snapshots = repository.snapshots(2024).unwrap();
+        let models = repository.models_v3_list().unwrap();
+        drop(repository);
+
+        let mut context = mock_context(noop_assets());
+        context.package_info_mut().version = current_version.parse().unwrap();
+        context.config_mut().plugins.0.insert("updater".into(), serde_json::json!({
+            "pubkey": public_key.trim(), "requireSignedVersion": true
+        }));
+        let app = mock_builder().plugin(tauri_plugin_updater::Builder::new().build()).build(context).unwrap();
+        let updater = app.updater_builder()
+            .endpoints(vec!["https://example.invalid/unused".parse().unwrap()]).unwrap()
+            .target("linux-x86_64").executable_path(&installed)
+            .build().unwrap();
+        let manifest = serde_json::json!({
+            "version": next_version,
+            "platforms": { "linux-x86_64": { "url": "https://example.invalid/unused.AppImage", "signature": signature.trim() } }
+        });
+        let update = updater.restore_update(manifest.clone()).unwrap().expect("Use an increasing version");
+        assert!(update.verify(&original).is_err());
+        let mut wrong_version = manifest;
+        wrong_version["version"] = "100.0.0".into();
+        assert!(updater.restore_update(wrong_version).unwrap().unwrap().verify(&package).is_err());
+        assert_eq!(fs::read(&installed).unwrap(), original);
+
+        update.install(&package).unwrap();
+        assert_eq!(fs::read(&installed).unwrap(), package);
+        assert_eq!(fs::metadata(&installed).unwrap().permissions().mode(), initial_mode);
+        let repository = F1Repository::open(profile.path()).unwrap();
+        assert_eq!(repository.snapshots(2024).unwrap(), snapshots);
+        assert_eq!(repository.models_v3_list().unwrap(), models);
+    }
 }

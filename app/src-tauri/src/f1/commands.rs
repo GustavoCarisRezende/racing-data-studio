@@ -17,7 +17,23 @@ fn write_export_bytes(path: &Path, extension: &str, content: &[u8]) -> Result<()
         options.mode(0o600);
     }
     let mut file = options.open(path).map_err(|_| "EXPORT_CREATE_FAILED".to_string())?;
-    file.write_all(content).and_then(|_| file.sync_all()).map_err(|_| "EXPORT_WRITE_FAILED".to_string())
+    if file.write_all(content).and_then(|_| file.sync_all()).is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err("EXPORT_WRITE_FAILED".into());
+    }
+    Ok(())
+}
+
+fn write_export(path: &Path, extension: &str, bytes: &[u8], manifest: Option<&str>) -> Result<(), String> {
+    write_export_bytes(path, extension, bytes)?;
+    if let Some(manifest) = manifest {
+        if let Err(error) = write_export_bytes(&path.with_extension("manifest.json"), "json", manifest.as_bytes()) {
+            let _ = std::fs::remove_file(path);
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 #[cfg(test)]
 fn write_export_text(path: &Path, extension: &str, content: &str) -> Result<(), String> { write_export_bytes(path, extension, content.as_bytes()) }
@@ -36,7 +52,7 @@ fn decode_export_image(kind: &str, content: &str) -> Result<Vec<u8>, String> {
 
 /// The frontend never supplies a path; each artifact requires a native chooser.
 #[tauri::command]
-pub async fn f1_export_text(app: tauri::AppHandle, kind: String, content: String) -> Result<bool, String> {
+pub async fn f1_export_text(app: tauri::AppHandle, kind: String, content: String, manifest: Option<String>) -> Result<bool, String> {
     let (extension, name, filter, binary) = match kind.as_str() {
         "csv" => ("csv", "racing-data.csv", "CSV", false),
         "svg" => ("svg", "racing-data.svg", "SVG", true),
@@ -44,6 +60,11 @@ pub async fn f1_export_text(app: tauri::AppHandle, kind: String, content: String
         _ => return Err("INVALID_EXPORT".into()),
     };
     if content.len() > EXPORT_TEXT_LIMIT { return Err("INVALID_EXPORT".into()); }
+    if let Some(manifest) = &manifest {
+        if kind != "csv" || manifest.len() > EXPORT_TEXT_LIMIT || !serde_json::from_str::<Value>(manifest).is_ok_and(|doc| doc["format"] == "rds-table-export" && doc["version"] == 1) {
+            return Err("INVALID_EXPORT".into());
+        }
+    }
     let bytes = if binary { decode_export_image(&kind, &content)? } else { content.into_bytes() };
     tauri::async_runtime::spawn_blocking(move || {
         let selected = app.dialog().file().set_file_name(name).add_filter(filter, &[extension]).blocking_save_file();
@@ -51,7 +72,7 @@ pub async fn f1_export_text(app: tauri::AppHandle, kind: String, content: String
             None => Ok(false),
             Some(selected) => {
                 let path = selected.into_path().map_err(|_| "INVALID_EXPORT".to_string())?;
-                write_export_bytes(&path, extension, &bytes)?;
+                write_export(&path, extension, &bytes, manifest.as_deref())?;
                 Ok(true)
             }
         }
@@ -97,6 +118,21 @@ mod export_text_tests {
         assert!(decode_export_image("jpeg", &STANDARD.encode(b"\xff\xd8\xffsynthetic\xff\xd9")).is_err());
         assert!(decode_export_image("svg", &STANDARD.encode(b"<svg xmlns=\"x\"></svg>")).is_ok());
         assert!(decode_export_image("csv", &png).is_err());
+    }
+
+    #[test]
+    fn csv_with_manifest_keeps_the_existing_file_on_a_name_collision() {
+        let base = tempfile::tempdir().unwrap();
+        let csv = base.path().join("analysis.csv");
+        let manifest = base.path().join("analysis.manifest.json");
+        std::fs::write(&manifest, "original").unwrap();
+        assert_eq!(write_export(&csv, "csv", b"header", Some("{}")), Err("EXPORT_CREATE_FAILED".into()));
+        assert!(!csv.exists());
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), "original");
+        std::fs::remove_file(&manifest).unwrap();
+        write_export(&csv, "csv", b"header", Some("{}")).unwrap();
+        assert_eq!(std::fs::read_to_string(&csv).unwrap(), "header");
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), "{}");
     }
 }
 
@@ -180,6 +216,13 @@ pub async fn f1_local_seasons(app: tauri::AppHandle) -> Result<Vec<Value>, Strin
 pub async fn f1_analysis_snapshots(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|mut r| r.analysis_snapshots()).map_err(|e| e.to_string()))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_analysis_catalog(app: tauri::AppHandle, revisions: Option<Vec<super::saved_analysis::Revision>>) -> Result<Vec<Value>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).and_then(|mut r| r.analysis_catalog(revisions)).map_err(|e| e.to_string()))
         .await.map_err(|e| e.to_string())?
 }
 
@@ -316,6 +359,32 @@ pub async fn f1_snapshots(app: tauri::AppHandle, year: u16) -> Result<Vec<Value>
 }
 
 #[tauri::command]
+pub async fn f1_backup_database(app: tauri::AppHandle, restore: bool) -> Result<bool, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file();
+        let selection = if restore {
+            dialog.add_filter("Racing Data Studio", &["zip", "sqlite"]).blocking_pick_file()
+        } else {
+            dialog.add_filter("ZIP", &["zip"])
+                .set_file_name(super::backup::file_name(chrono::Local::now().naive_local()))
+                .blocking_save_file()
+        };
+        let Some(selection) = selection else { return Ok(false); };
+        let mut path = selection.into_path().map_err(|_| "BACKUP_INVALID_PATH".to_string())?;
+        if !restore && path.extension().is_none() {
+            path.set_extension("zip");
+        }
+        super::backup::validate_path(&data_dir, &path, restore).map_err(|e| e.to_string())?;
+        let _lock = acquire_file_lock(&data_dir)?;
+        let mut repository = F1Repository::open(&data_dir).map_err(|e| e.to_string())?;
+        if restore { repository.restore_backup(&path) }
+        else { repository.export_backup(&path) }.map_err(|e| e.to_string())?;
+        Ok(true)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn f1_snapshot_rename(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: i32, snapshot_id: i64, name: String) -> Result<(), String> {
     if !(1950..=2100).contains(&year) || snapshot_id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
     let dir = app.path().app_data_dir().map_err(|_| "DATABASE_ERROR".to_string())?;
@@ -340,14 +409,21 @@ pub async fn f1_snapshot_activate(app: tauri::AppHandle, state: tauri::State<'_,
 }
 
 #[tauri::command]
-pub async fn f1_snapshot_delete(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: i32, snapshot_id: i64) -> Result<(), String> {
+pub async fn f1_snapshot_dependents(app: tauri::AppHandle, year: i32, snapshot_id: i64) -> Result<Vec<super::saved_analysis::SnapshotDependent>, String> {
+    let dir = app.path().app_data_dir().map_err(|_| "DATABASE_ERROR".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || F1Repository::open(&dir).map_err(|_| "DATABASE_ERROR".to_string())?.snapshot_dependents(year, snapshot_id))
+        .await.map_err(|_| "DATABASE_ERROR".to_string())?
+}
+
+#[tauri::command]
+pub async fn f1_snapshot_delete(app: tauri::AppHandle, state: tauri::State<'_, Arc<SyncState>>, year: i32, snapshot_id: i64, confirmed: Vec<super::saved_analysis::SnapshotDependent>) -> Result<(), String> {
     if !(1950..=2100).contains(&year) || snapshot_id <= 0 { return Err("INVALID_SNAPSHOT".into()); }
     let dir = app.path().app_data_dir().map_err(|_| "DATABASE_ERROR".to_string())?;
     let guard = state.inner().begin(year as u16)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let _lock = acquire_file_lock(&dir)?;
-        F1Repository::open(&dir).map_err(|_| "DATABASE_ERROR".to_string())?.delete_snapshot(year, snapshot_id)
+        F1Repository::open(&dir).map_err(|_| "DATABASE_ERROR".to_string())?.delete_snapshot(year, snapshot_id, &confirmed)
     }).await.map_err(|_| "DATABASE_ERROR".to_string())?
 }
 

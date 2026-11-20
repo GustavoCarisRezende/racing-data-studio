@@ -177,6 +177,35 @@ Linux substitui o AppImage gravável e reinicia. Importações, modelos e prefer
 não são resetados. Linux exige permissão de escrita no local do AppImage.
 Falhas de rede não bloqueiam o uso local nem abrem diálogos espontâneos.
 
+## Validação de instalação e atualização
+
+O workflow **Check desktop changes** roda a compilação do frontend e as suítes
+JavaScript, Rust e Python em pull requests no Linux e no Windows. O workflow de
+candidatos usa a mesma ação de validação antes de empacotar os instaladores.
+
+No Linux x64, este teste usa dois AppImages de versões crescentes com a mesma
+chave de teste. Ele valida a rejeição de uma versão anunciada incorreta,
+substitui uma cópia descartável do AppImage pelo updater Tauri e reabre o SQLite
+para verificar os snapshots e modelos.
+
+```sh
+RDS_SMOKE_CURRENT_APPIMAGE=/caminho/versao-anterior.AppImage \
+RDS_SMOKE_NEXT_APPIMAGE=/caminho/versao-nova.AppImage \
+RDS_SMOKE_CURRENT_VERSION=0.0.1-beta.1 \
+RDS_SMOKE_NEXT_VERSION=0.0.1-beta.2 \
+RDS_SMOKE_UPDATER_KEY=/caminho/chave-de-teste.pub \
+cargo test --manifest-path app/src-tauri/Cargo.toml --locked \
+  updates::tests::installs_signed_appimage_without_changing_local_data -- --ignored --exact
+```
+
+Para validar a interface, a rede e o reinício, use máquinas virtuais descartáveis
+com AppImage e NSIS. Use builds assinados de um repositório de homologação com
+URLs de atualização próprias. Na versão anterior, crie dados e um modelo de
+teste, anote o snapshot ativo e exporte um backup. Execute **Verificar
+atualizações** e **Instalar e reiniciar**. Confira a nova versão, o modelo,
+o snapshot ativo e o resultado da consulta após reabrir. No Windows, teste
+também o MSI fora do fluxo automático. Registre versões e plataformas testadas.
+
 ## Critérios de liberação
 
 - [ ] Validar instalação limpa e atualização entre duas versões descartáveis assinadas.

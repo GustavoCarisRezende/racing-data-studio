@@ -34,9 +34,9 @@ flowchart TD
   Client --> Repo
 ```
 
-In the analytical flow, IPC delivers local pages/revisions and the TypeScript adapter projects and aggregates them in memory; the diagram does not imply that every query runs in SQL or Rust. Charts do not access the network. The remote catalog/importer uses Rust; `latest` does not mean downloading.
+For analytics, Rust provides a season catalog and projects the snapshots needed for each query. The TypeScript adapter aggregates the results in memory. Charts use local data. The importer and remote catalog use Rust.
 
-The SQLite database `categories/f1.sqlite` lives in the application's data directory. Migrations are transactional through schema **10** and reject future versions. Imported JSON pages are the authoritative local source; queries project their data. Migration 9 adds names and migration 10 records the active snapshot, initially the highest-ID snapshot. In the model contract, `latest` resolves the **active** snapshot, not necessarily the highest ID; a resolved selection remains frozen while in use. Legacy analyses pin revisions and may fail if their snapshots are deleted. Deleting the active snapshot is prohibited, but legacy references do not block deletion.
+The SQLite database `categories/f1.sqlite` lives in the application's data directory. Migrations are transactional through schema **10** and reject future versions. Imported JSON pages are the authoritative local source; queries project their data. Migration 9 adds names and migration 10 records the active snapshot, initially the highest-ID snapshot. In the model contract, `latest` resolves the **active** snapshot, not necessarily the highest ID; a resolved selection remains frozen while in use. Legacy analyses pin revisions. When deleting an inactive snapshot, the app lists any linked analyses and requires confirmation of the current list.
 
 Paginated synchronization validates origin, pages, and detectable coverage against the most recently saved version, not an activated historical version. Every successful synchronization saves and activates a new snapshot, including identical content (which preserves the source date). Failures preserve previous versions. These checks do not prove completeness; legitimate corrections may be rejected. Cooperative in-memory and file locks limit local concurrency; they do not coordinate machines. Per-event copies are manual, supplemental, and available on Linux; they are neither restoration nor database backups.
 
@@ -66,7 +66,7 @@ Paginated synchronization validates origin, pages, and detectable coverage again
 | Model `latest` | Resolves the local active snapshot when opened; the selection is then frozen for queries/facets. |
 | Legacy analysis `pinned` | Requires original revisions and a compatible transformation; no silent fallback. |
 
-Restoring an earlier snapshot validates and copies its content into a new active snapshot; restoring the already active snapshot may perform no copy. Confirming its own automatic name without a custom name does not write metadata. Deleting an inactive snapshot may break a pinned analysis: its references do not block deletion.
+Restoring an earlier snapshot validates and copies its content into a new active snapshot; restoring the already active snapshot may perform no copy. Confirming its own automatic name without a custom name does not write metadata. Deleting an inactive snapshot removes its dependent analyses in the same transaction.
 
 ### IPC commands
 
@@ -76,13 +76,14 @@ The names below are Rust names; Tauri converts argument names according to its J
 |---|---|
 | `f1_remote_seasons`, `f1_local_seasons`, `f1_sync_status` | No user arguments: remote catalog, local seasons, and progress. |
 | `f1_sync`, `f1_season_details`, `f1_snapshots` | `year`: import, read active events/results, or list history. |
-| `f1_analysis_snapshots`, `f1_analysis_pinned` | No arguments or `revisions`: read active snapshots or pinned revisions. |
+| `f1_analysis_catalog`, `f1_analysis_snapshots`, `f1_analysis_pinned` | Read revision metadata, all active snapshots, or specific revisions, respectively. |
 | `f1_analyses_list`, `f1_analysis_load/save/delete` | List or `id`; saving uses `document` and `expected_revision`, deletion uses `id` and the expected revision. |
 | `f1_models_list`, `f1_model_load/save/delete` | v2 store; `id`, `document`, `expected_revision` as appropriate. |
 | `f1_models_v3_list`, `f1_model_v3_load/save/delete`, `f1_models_restore_defaults` | v3 store reads v2/v3; same CRUD arguments. Restoring missing defaults takes no document and does not overwrite existing models. |
-| `f1_snapshot_rename/activate/delete` | `year`, `snapshot_id`, and `name` when renaming. |
+| `f1_snapshot_rename/activate/dependents/delete` | `year` and `snapshot_id`. Rename also receives `name`, and delete receives the `confirmed` list returned by the dependency check. |
+| `f1_backup_database` | `restore` selects whether to export or restore the F1 database via a native file picker. |
 | `f1_restore_snapshot`, `f1_copy_snapshot_events` | `year`, `id`; restore or create supplemental per-event projections, the latter Linux-only. |
-| `f1_export_text` | `kind` (`csv`, `svg`, `png`) and `content`; a native picker selects the destination, with no arbitrary frontend path. |
+| `f1_export_text` | `kind` (`csv`, `svg`, `png`), `content`, and an optional `manifest` for CSV. A native picker selects the destination. |
 | `reset_application`, `open_github`, `toggle_fullscreen` | No user arguments; UI-confirmed reset, fixed URL, and fullscreen toggle. |
 | `set_application_zoom` | Finite `factor` from 0.7 to 2.0; native zoom restricted to the main window. |
 

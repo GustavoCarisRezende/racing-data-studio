@@ -175,6 +175,35 @@ Linux replaces the writable AppImage and restarts. Imported data, templates, and
 preferences are not reset. Linux needs write access to the AppImage location.
 Offline checks fail without blocking local use or opening unsolicited dialogs.
 
+## Installation and update validation
+
+On pull requests, **Check desktop changes** builds the frontend and runs the
+JavaScript, Rust and Python suites on Linux and Windows. Candidate builds use the
+same validation action before packaging installers.
+
+On Linux x64, the following test takes two increasing AppImage versions signed
+with the same disposable key. It verifies that a mismatched version is rejected,
+uses the Tauri updater to replace a disposable copy of the AppImage and reopens
+SQLite to check snapshots and templates.
+
+```sh
+RDS_SMOKE_CURRENT_APPIMAGE=/path/previous-version.AppImage \
+RDS_SMOKE_NEXT_APPIMAGE=/path/new-version.AppImage \
+RDS_SMOKE_CURRENT_VERSION=0.0.1-beta.1 \
+RDS_SMOKE_NEXT_VERSION=0.0.1-beta.2 \
+RDS_SMOKE_UPDATER_KEY=/path/test-key.pub \
+cargo test --manifest-path app/src-tauri/Cargo.toml --locked \
+  updates::tests::installs_signed_appimage_without_changing_local_data -- --ignored --exact
+```
+
+To validate the interface, network and restart, use disposable virtual machines
+for AppImage and NSIS and signed builds from a staging repository with its own
+update URLs. On the earlier version, create test data and a model, note the
+active snapshot and export a backup. Run **Check for updates** and **Install and
+restart**. After reopening the app, verify the new version, model, active
+snapshot and query results. On Windows, test the MSI separately from the
+automatic update. Record the tested versions and platforms.
+
 ## Release gate
 
 - [ ] Validate clean install and update between two signed disposable versions.

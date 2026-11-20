@@ -9,5 +9,5 @@ export interface CategoryModule {
   description: MessageKey;
   openLabel: MessageKey;
   Icon: ComponentType;
-  Screen: ComponentType<{ t: Translate; locale: Locale; tutorial?: TutorialBridge }>;
+  Screen: ComponentType<{ t: Translate; locale: Locale; tutorial?: TutorialBridge; confirmNavigation?: (proceed: () => void) => void }>;
 }

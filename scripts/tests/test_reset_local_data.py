@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,7 @@ reset = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reset)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux-only reset helper")
 class ResetTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

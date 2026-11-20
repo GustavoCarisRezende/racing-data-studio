@@ -133,11 +133,10 @@ não uma versão histórica ativada pelo usuário.
   Restaurar e Excluir. A lixeira é a última opção, com rótulo acessível e sem
   texto visual adicional. O registro ocupa uma linha horizontal em telas largas
   e pode quebrar em telas menores. A exclusão exige confirmação modal.
-- O snapshot ativo não pode ser excluído. A trava baseada em análises legadas
-  foi removida; excluir uma versão referenciada por um registro legado pode
-  impedir a reabertura desse registro.
-- As verificações e a exclusão de páginas e snapshot ocorrem na mesma transação
-  de escrita, sob os bloqueios cooperativos usados pela sincronização.
+- O snapshot ativo é protegido. Para capturas inativas, o aplicativo informa
+  quais análises legadas serão excluídas junto com a captura e pede confirmação.
+- A verificação da lista confirmada e a exclusão dessas análises, páginas e
+  snapshot ocorrem na mesma transação de escrita.
 - Renomear não altera IDs ou nomes de arquivos. Excluir não apaga cópias por
   evento já publicadas; essas cópias não são cópias completas do banco.
 - Falhas de exclusão aparecem dentro do modal; conflitos de nome são mostrados
@@ -197,11 +196,11 @@ permanente; abrir ou cancelar o aviso não limpa dados. Confirmar prepara a
 limpeza e o reinício do aplicativo. Cancelar recebe o foco inicial por segurança,
 e a ordem das ações depende do diálogo.
 
-A build não executa o script Python: usa uma implementação nativa equivalente,
-sem depender de Python instalado. A limpeza deve ocorrer na inicialização antes
-de abrir o banco e o WebView; inclui o armazenamento local que registra a
-conclusão do tutorial. Exportações salvas fora dos diretórios do aplicativo não
-são apagadas. No navegador, a opção é indisponível.
+Na inicialização, a implementação nativa move os diretórios do app para pastas
+temporárias vizinhas antes de abrir o banco e o WebView. Uma falha nessa etapa
+desfaz as movimentações. Após confirmar essa etapa, a limpeza das pastas
+temporárias pode ser retomada em outra inicialização. Isso inclui o armazenamento
+local do tutorial. Exportações externas são preservadas.
 
 O fluxo nativo foi conferido no Linux/XWayland com diretórios XDG isolados:
 confirmação real via IPC, encerramento/reabertura, remoção dos arquivos de teste

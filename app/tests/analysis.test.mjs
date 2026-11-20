@@ -129,6 +129,39 @@ test('reopening pinned revisions after restart does not silently switch to lates
   await assert.rejects(missing.resolveSelection({ protocolVersion: 1, datasetId: 'f1.session_results', policy: 'pinned', partitionIds: ['2024'], revisions: selection.revisions }));
 });
 
+test('desktop catalog keeps analysis scoped and allows more than eight resolutions', async () => {
+  const datasetId = 'f1.session_results';
+  const snapshots = Array.from({ length: 10 }, (_, index) => snapshot(2016 + index, String(index + 1), [entry('1', 'results', 'a', '1')]));
+  snapshots.at(-1).results[0].result.position = '0';
+  const catalog = snapshots.map(({ year, id, storedAt, sourceDataAt }) => ({
+    partitionId: String(year), revisionId: id, storedAt, sourceDataAt, counts: { results: 1, sprint: 0 },
+  }));
+  const reads = [];
+  const provider = createProvider(async refs => {
+    reads.push(refs.map(ref => ref.partitionId));
+    return refs.map(ref => snapshots.find(item => item.id === ref.revisionId));
+  }, Date.now, async () => catalog);
+  assert.equal((await provider.listDatasets()).length, 1);
+  const descriptor = await provider.describeDataset({ datasetId, locale: 'en-US' });
+  const request = { protocolVersion: 1, datasetId, policy: 'latest', partitionIds: [] };
+  const selection = await provider.resolveSelection(request);
+  const facets = await provider.facet({ protocolVersion: 1, datasetId, selection, fieldId: 'season', filters: [], search: '', limit: 100 });
+  assert.equal(facets.values.length, 10);
+  assert.deepEqual(reads, []);
+  const query = base(selection, descriptor);
+  const filtered = year => ({ ...query, filters: [{ fieldId: 'season', op: 'in', values: [year] }] });
+  await assert.rejects(provider.query(filtered('2025')), /Invalid stored integer/);
+  assert.equal((await provider.query(filtered('2024'))).rows[0].values.points, '1');
+  await provider.query(filtered('2024'));
+  assert.deepEqual(reads, [['2025'], ['2024']]);
+  for (const { partitionId } of catalog) {
+    const scoped = await provider.resolveSelection({ ...request, partitionIds: [partitionId] });
+    assert.deepEqual(scoped.revisions.map(ref => ref.partitionId), [partitionId]);
+  }
+  const reopened = await provider.resolveSelection(request);
+  assert.equal((await provider.query({ ...filtered('2024'), selection: reopened })).rows[0].values.points, '1');
+});
+
 test('store validates input and native output, and reports conflicts', async () => {
   const provider = createProvider(async () => [snapshot(2024, '1', [entry('1', 'results', 'a', '1')])]);
   const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: 'f1.session_results', policy: 'latest', partitionIds: [] });

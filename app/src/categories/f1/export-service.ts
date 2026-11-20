@@ -1,13 +1,15 @@
 import type { ExportArtifact, ImageExportArtifact } from '@rds/sandbox-contracts';
 
 /** Invoker is injected for tests; the native command, not the frontend, chooses each path. */
-export function createTextExporter(invoke: (command: string, args: { kind: string; content: string }) => Promise<boolean>) {
+export function createTextExporter(invoke: (command: string, args: { kind: string; content: string; manifest?: string }) => Promise<boolean>) {
   return async (files: ExportArtifact[], signal?: AbortSignal) => {
-    if (files.length !== 1 || files[0]?.mediaType !== 'text/csv;charset=utf-8') throw { code: 'INVALID_EXPORT' };
+    const [csv, manifest] = files;
+    if (!csv || csv.mediaType !== 'text/csv;charset=utf-8' || files.length > 2
+        || (manifest && manifest.mediaType !== 'application/json')) throw { code: 'INVALID_EXPORT' };
     if (files.some(file => new TextEncoder().encode(file.text).length > 16 * 1024 * 1024)) throw { code: 'EXPORT_TOO_LARGE' };
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     try {
-      const saved = await invoke('f1_export_text', { kind: 'csv', content: files[0]!.text });
+      const saved = await invoke('f1_export_text', { kind: 'csv', content: csv.text, ...(manifest ? { manifest: manifest.text } : {}) });
       if (!saved) throw { code: 'EXPORT_CANCELLED' };
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error) throw error;

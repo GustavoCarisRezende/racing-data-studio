@@ -327,6 +327,7 @@ export interface SandboxHostServices {
   restoreDefaultModels?: (signal?: AbortSignal) => Promise<void>;
   /** Native chooser/write remains the host's responsibility. No arbitrary fs in UI. */
   exportFiles?: (files: ExportArtifact[], signal?: AbortSignal) => Promise<void>;
+  supportsExportManifest?: boolean;
   exportImage?: (file: ImageExportArtifact, signal?: AbortSignal) => Promise<void>;
   confirm?: (request: { kind: 'discardChanges' | 'deleteModel'; title: string }, signal?: AbortSignal) => Promise<boolean>;
   /** Shell must use this to protect navigation outside the library. */
