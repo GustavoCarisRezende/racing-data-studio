@@ -42,10 +42,12 @@ def collect(platform, root=ROOT, signed=False):
             candidates = list((bundle / subdir).glob(f"*{extension}"))
             if len(candidates) != 1:
                 raise ValueError(f"Expected exactly one {extension} installer")
-            shutil.copy2(candidates[0], output / candidates[0].name)
+            suffix = "-setup.exe" if subdir == "nsis" else extension
+            target = output / f"racing-data-studio_{version}_windows_x64{suffix}"
+            shutil.copy2(candidates[0], target)
             if signed:
                 signature = candidates[0].with_name(candidates[0].name + ".sig")
-                shutil.copy2(signature, output / signature.name)
+                shutil.copy2(signature, output / (target.name + ".sig"))
     shutil.copy2(root / "LICENSE", output / "LICENSE")
     shutil.copy2(notices, output / "THIRD-PARTY-NOTICES.txt")
     checksums(output)

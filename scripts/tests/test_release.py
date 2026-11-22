@@ -67,13 +67,19 @@ class ReleaseTests(unittest.TestCase):
             release.set_version("0.0.1-beta.1", root)
             bundle = root / "app/src-tauri/target/release/bundle/nsis"
             bundle.mkdir(parents=True)
-            for path in (bundle / "setup.exe", bundle / "setup.exe.sig", root / "LICENSE",
-                         root / "release-notices.txt"):
+            setup = bundle / "Racing Data Studio_0.0.1-beta.1_x64-setup.exe"
+            signature = setup.with_suffix(".exe.sig")
+            setup.write_bytes(b"installer fixture")
+            signature.write_text("signature fixture")
+            for path in (root / "LICENSE", root / "release-notices.txt"):
                 path.write_text("fixture")
             output = collector.collect("windows-x64", root, signed=True)
+            asset = "racing-data-studio_0.0.1-beta.1_windows_x64-setup.exe"
             self.assertEqual({path.name for path in output.iterdir()}, {
-                "setup.exe", "setup.exe.sig", "LICENSE", "THIRD-PARTY-NOTICES.txt", "SHA256SUMS",
+                asset, f"{asset}.sig", "LICENSE", "THIRD-PARTY-NOTICES.txt", "SHA256SUMS",
             })
+            self.assertEqual((output / asset).read_bytes(), setup.read_bytes())
+            self.assertEqual((output / f"{asset}.sig").read_bytes(), signature.read_bytes())
 
     def test_release_verification_requires_msi_only_for_stable(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(verifier.feed, "verify_artifact") as check:
