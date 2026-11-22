@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.([1-9]\d*))?")
+WINDOWS_INSTALLER_EXTENSIONS = {"nsis": ".exe", "msi": ".msi"}
 
 
 def version_files(root):
@@ -30,6 +31,14 @@ def validate_version(version):
     if major > 255 or minor > 255 or patch > 65535:
         raise ValueError("Version exceeds Windows Installer numeric limits")
     return version
+
+
+def bundle_formats(platform, version):
+    validate_version(version)
+    if platform == "linux-x64":
+        return ("appimage",)
+    # WiX requires numeric pre-release components, unlike the app's beta.N suffix.
+    return ("nsis",) if "-beta." in version else ("nsis", "msi")
 
 
 def read_versions(root=ROOT):
@@ -149,6 +158,8 @@ def main():
     check.add_argument("--version")
     update = sub.add_parser("version")
     update.add_argument("version")
+    bundles = sub.add_parser("bundles")
+    bundles.add_argument("--platform", choices=("linux-x64", "windows-x64"), required=True)
     archive = sub.add_parser("linux-archive")
     archive.add_argument("--appimage", required=True)
     archive.add_argument("--output", required=True)
@@ -163,6 +174,8 @@ def main():
         elif args.command == "version":
             set_version(args.version)
             print(check_version(args.version))
+        elif args.command == "bundles":
+            print(",".join(bundle_formats(args.platform, check_version())))
         elif args.command == "linux-archive":
             print(linux_archive(args.appimage, args.output, args.version, args.notices))
         else:

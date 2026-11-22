@@ -6,7 +6,8 @@ Implemented in the working tree:
 
 - Explicit application icons for Linux and Windows packaging.
 - A manually triggered/tag-triggered GitHub Actions candidate build for Linux x64
-  (AppImage and a tar.gz containing it) and Windows x64 (NSIS EXE and WiX MSI).
+  (AppImage and a tar.gz containing it) and Windows x64 (NSIS EXE for beta and
+  stable versions, WiX MSI for stable versions).
 - Synchronized application-version checks and a version-setting tool.
 - Whitelisted packaging, notices, checksums, and an update-manifest preparation tool.
 - Unit tests for versioning, packaging, and manifest preparation.
@@ -24,6 +25,16 @@ not self-update in this initial integration. AppImage and Windows NSIS are suppo
 targets; MSI remains a manual installer to avoid unvalidated MSI→EXE migrations.
 Windows builds, GitHub workflows, and actual signed cross-version installation
 must still be validated on their target systems before public distribution.
+
+## Release candidates
+
+A candidate is the set of installers built from a known commit for testing
+before publication. Under **Actions → Build desktop candidate**, select
+**Run workflow** and choose the branch to test. After the run, download the
+packages under **Artifacts**. This workflow produces builds without updater
+signatures. **Prepare signed release draft** builds signed candidates from a tag
+and uploads the files to a release draft. The [beta guide](BETA.md) describes the
+downloads for testers.
 
 ## Local Linux test build
 
@@ -74,30 +85,31 @@ these instructions do not create one automatically.
 
 `0.0.1-beta.1` is lower than the old development version `0.1.0`; existing
 development installations cannot discover it through a normal upgrade comparison.
-Windows Installer has numeric-version constraints; verify MSI beta-to-beta
-upgrade identity/version handling separately. EXE is the planned primary
-Windows updater target, not an untested MSI→EXE migration.
-The WiX UpgradeCode is pinned to the value reported by `tauri inspect wix-upgrade-code`;
-NSIS uses per-user installation. Choose one installer format; do not install both
-as though they were a single managed installation.
+Beta builds produce the `*-setup.exe` installer with NSIS for per-user
+installation and automatic updates. The MSI (WiX) is reserved for stable
+versions because WiX requires numeric version components. It has a fixed
+UpgradeCode and its installation and upgrades follow a separate manual process.
 
 ## Maintainer setup: signing
 
-1. The maintainer generates a Tauri signing key outside the repository:
-   `npm run tauri signer generate -- -w <private-location>/rds-updater.key`
-   from `app/`. Do not paste private keys into issues, chat, or source files.
-2. Store the private key/password as GitHub Actions secrets
-   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-   The private-key secret contains the key file's full content, not a local path.
-   Store the public key's content as repository variable `TAURI_UPDATER_PUBLIC_KEY`.
-   The signed-build overlay embeds it in the application. Losing the private key
-   can prevent upgrades of installations trusting its public key.
-3. `prepare-updater.py` validates the public-key format and generates
+1. From `app/`, generate the key pair in a private directory outside the
+   repository with `npm run tauri signer generate -- -w "$HOME/.tauri/rds-updater.key"`.
+   Enter a strong password at the prompt. You can generate a random
+   64-character hexadecimal password with `openssl rand -hex 32` in a private
+   terminal or use a password manager. Tauri generates the keys and uses the
+   password to protect the private key. Keep a safe copy of the private key and
+   password to maintain compatibility with existing installations.
+2. Under **Settings → Secrets and variables → Actions → Variables**, create the
+   repository variable `TAURI_UPDATER_PUBLIC_KEY` containing `rds-updater.key.pub`.
+3. Under **Settings → Environments → release-signing**, create the secrets
+   `TAURI_SIGNING_PRIVATE_KEY` (the full contents of `rds-updater.key`) and
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the password used during key generation).
+4. `prepare-updater.py` validates the public-key format and generates
    `tauri.release.generated.json`; it writes no private key. The signed workflow
    enables `bundle.createUpdaterArtifacts` and `requireSignedVersion`.
    Updater signatures do not replace Windows
    Authenticode signing or guarantee SmartScreen reputation.
-4. Configure required reviewers on GitHub environments `release-signing`, `release`, and
+5. Configure required reviewers on GitHub environments `release-signing`, `release`, and
    `update-channel`. Creating these names in YAML does not itself enforce approval.
    Restrict workflow/tag changes and access to signing secrets to maintainers.
 
@@ -201,14 +213,15 @@ for AppImage and NSIS and signed builds from a staging repository with its own
 update URLs. On the earlier version, create test data and a model, note the
 active snapshot and export a backup. Run **Check for updates** and **Install and
 restart**. After reopening the app, verify the new version, model, active
-snapshot and query results. On Windows, test the MSI separately from the
-automatic update. Record the tested versions and platforms.
+snapshot and query results. On Windows, test clean installation and EXE-to-EXE
+updates. For stable versions, also test the MSI separately. Record the tested
+versions and platforms.
 
 ## Release gate
 
 - [ ] Validate clean install and update between two signed disposable versions.
 - [ ] Test bad signatures, no network, interrupted downloads, and unwritable paths.
-- [ ] Test Linux AppImage (including extracted tar.gz), EXE→EXE, and MSI behavior.
+- [ ] Test Linux AppImage (including extracted tar.gz) and EXE→EXE. Test MSI for stable versions.
 - [ ] Preserve imports, models, preferences, and database migration behavior.
 - [ ] Confirm beta/stable isolation and no automatic downgrades.
 - [ ] Review native dependency licenses, notices, SBOM, and Windows signing status.

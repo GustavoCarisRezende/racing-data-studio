@@ -5,7 +5,14 @@ import argparse
 import shutil
 from pathlib import Path
 
-from release import ROOT, check_version, checksums, linux_archive
+from release import (
+    ROOT,
+    WINDOWS_INSTALLER_EXTENSIONS,
+    bundle_formats,
+    check_version,
+    checksums,
+    linux_archive,
+)
 
 
 def collect(platform, root=ROOT, signed=False):
@@ -30,8 +37,9 @@ def collect(platform, root=ROOT, signed=False):
         if signed:
             shutil.copy2(images[0].with_name(images[0].name + ".sig"), output / (target.name + ".sig"))
     else:
-        for subdir, extension in (("nsis", "exe"), ("msi", "msi")):
-            candidates = list((bundle / subdir).glob(f"*.{extension}"))
+        for subdir in bundle_formats(platform, version):
+            extension = WINDOWS_INSTALLER_EXTENSIONS[subdir]
+            candidates = list((bundle / subdir).glob(f"*{extension}"))
             if len(candidates) != 1:
                 raise ValueError(f"Expected exactly one {extension} installer")
             shutil.copy2(candidates[0], output / candidates[0].name)

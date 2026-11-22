@@ -5,8 +5,9 @@
 Implementado na árvore de trabalho:
 
 - Ícones explícitos para empacotamento Linux e Windows.
-- Workflow GitHub Actions manual/por tag para candidatos Linux x64
-  (AppImage e tar.gz contendo o AppImage) e Windows x64 (EXE NSIS e MSI WiX).
+- Workflow GitHub Actions manual/por tag para Linux x64 (AppImage e tar.gz
+  contendo o AppImage) e Windows x64 (EXE NSIS para beta e estável, MSI WiX
+  para versões estáveis).
 - Verificação de versões sincronizadas e ferramenta para alterar a versão.
 - Empacotamento por lista explícita, avisos legais, checksums e preparação
   de manifesto de atualização.
@@ -25,6 +26,16 @@ não se atualizam sozinhos nesta integração inicial. Os alvos são AppImage e
 Windows NSIS; MSI continua sendo instalador manual para evitar migração MSI→EXE
 sem validação. Builds Windows, workflows GitHub e instalação real entre versões
 assinadas ainda precisam de validação nos sistemas-alvo antes da distribuição pública.
+
+## Candidatos a release
+
+Um candidato é o conjunto de instaladores compilados a partir de um commit
+identificado para testar antes da publicação. Em **Actions → Build desktop
+candidate**, selecione **Run workflow** e escolha a branch a testar. Após a
+execução, baixe os pacotes em **Artifacts**. Esse fluxo gera candidatos sem
+assinatura do atualizador. **Prepare signed release draft** gera candidatos
+assinados a partir da tag e envia os arquivos para um rascunho de release.
+O [guia da beta](BETA.md) descreve os downloads voltados aos testadores.
 
 ## Build local de teste Linux
 
@@ -75,31 +86,32 @@ processo de publicação; as instruções não fazem isso automaticamente.
 
 `0.0.1-beta.1` é inferior à versão antiga de desenvolvimento `0.1.0`; instalações
 de desenvolvimento existentes não a descobrem pelo comparador normal de upgrade.
-O Windows Installer tem restrições de versão numérica; validar separadamente a
-identidade e o versionamento dos upgrades MSI entre betas. EXE é o alvo principal
-planejado para o updater Windows, não uma migração MSI→EXE sem testes.
-O UpgradeCode WiX foi fixado no valor informado por `tauri inspect wix-upgrade-code`;
-NSIS instala por usuário. Escolha um formato de instalador; não instale os dois
-como se fossem uma única instalação gerenciada.
+A beta gera o instalador `*-setup.exe` com NSIS, que instala por usuário e
+participa da atualização automática. O MSI (WiX) fica reservado às versões
+estáveis por causa das restrições de versão numérica do WiX. Seu UpgradeCode é
+fixo e a instalação e atualização do MSI seguem um fluxo manual separado.
 
 ## Configuração do mantenedor: assinatura
 
-1. O mantenedor gera uma chave de assinatura Tauri fora do repositório:
-   `npm run tauri signer generate -- -w <local-privado>/rds-updater.key`
-   a partir de `app/`. Não colar chaves privadas em issues, conversas ou código.
-2. Guardar chave privada/senha nos secrets GitHub Actions
-   `TAURI_SIGNING_PRIVATE_KEY` e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-   O secret da chave privada recebe o conteúdo completo do arquivo, não um caminho local.
-   Guardar o conteúdo da chave pública na variável de repositório
-   `TAURI_UPDATER_PUBLIC_KEY`. O overlay do build assinado incorpora essa chave.
-   Perder a chave privada
-   pode impedir upgrades das instalações que confiam na chave pública anterior.
-3. `prepare-updater.py` valida o formato da chave pública e gera
+1. A partir de `app/`, gere o par de chaves em uma pasta privada fora do
+   repositório com `npm run tauri signer generate -- -w "$HOME/.tauri/rds-updater.key"`.
+   Informe uma senha forte no prompt. Você pode gerar uma senha aleatória de
+   64 caracteres hexadecimais com `openssl rand -hex 32` em um terminal privado
+   ou usar um gerenciador de senhas. O Tauri gera as chaves e usa a senha para
+   proteger a chave privada. Guarde a chave privada e a senha em local seguro
+   para manter a compatibilidade com as instalações existentes.
+2. Em **Settings → Secrets and variables → Actions → Variables**, crie a
+   variável de repositório `TAURI_UPDATER_PUBLIC_KEY` com o conteúdo de
+   `rds-updater.key.pub`.
+3. Em **Settings → Environments → release-signing**, crie os secrets
+   `TAURI_SIGNING_PRIVATE_KEY` (conteúdo completo de `rds-updater.key`) e
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (a senha usada na geração).
+4. `prepare-updater.py` valida o formato da chave pública e gera
    `tauri.release.generated.json`, sem gravar a chave privada. O workflow assinado
    ativa `bundle.createUpdaterArtifacts` e `requireSignedVersion`.
    As assinaturas não substituem assinatura Authenticode do
    Windows nem garantem reputação no SmartScreen.
-4. Configurar revisores obrigatórios nos ambientes GitHub `release-signing`, `release` e
+5. Configure revisores obrigatórios nos ambientes GitHub `release-signing`, `release` e
    `update-channel`. Declarar esses nomes no YAML não impõe aprovação por si só.
    Restringir alterações de workflows/tags e acesso aos secrets aos mantenedores.
 
@@ -204,13 +216,14 @@ URLs de atualização próprias. Na versão anterior, crie dados e um modelo de
 teste, anote o snapshot ativo e exporte um backup. Execute **Verificar
 atualizações** e **Instalar e reiniciar**. Confira a nova versão, o modelo,
 o snapshot ativo e o resultado da consulta após reabrir. No Windows, teste
-também o MSI fora do fluxo automático. Registre versões e plataformas testadas.
+a instalação limpa e a atualização de EXE para EXE. Para versões estáveis,
+valide também o MSI separadamente. Registre versões e plataformas testadas.
 
 ## Critérios de liberação
 
 - [ ] Validar instalação limpa e atualização entre duas versões descartáveis assinadas.
 - [ ] Testar assinatura inválida, falta de rede, download interrompido e local sem escrita.
-- [ ] Testar AppImage Linux (inclusive extraído do tar.gz), EXE→EXE e comportamento MSI.
+- [ ] Testar AppImage Linux (inclusive extraído do tar.gz) e EXE→EXE. Testar MSI para versões estáveis.
 - [ ] Preservar importações, modelos, preferências e comportamento das migrations.
 - [ ] Confirmar isolamento beta/stable e ausência de downgrade automático.
 - [ ] Revisar licenças nativas, avisos, SBOM e situação da assinatura Windows.

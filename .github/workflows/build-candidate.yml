@@ -38,10 +38,8 @@ jobs:
         include:
           - platform: linux-x64
             os: ubuntu-22.04
-            bundles: appimage
           - platform: windows-x64
             os: windows-2022
-            bundles: nsis,msi
     runs-on: ${{ matrix.os }}
     environment: ${{ inputs.signed && 'release-signing' || 'candidate-build' }}
     timeout-minutes: 60
@@ -60,6 +58,13 @@ jobs:
       - uses: ./.github/actions/desktop-check
         with:
           requested-ref: ${{ inputs.ref }}
+      - name: Select native package formats
+        id: packages
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          bundles=$(python -B scripts/release.py bundles --platform "$PLATFORM")
+          echo "bundles=$bundles" >> "$GITHUB_OUTPUT"
       - name: Collect JavaScript license notices
         working-directory: packages
         run: npm run notices --silent > ../release-notices.txt
@@ -67,7 +72,7 @@ jobs:
         if: ${{ !inputs.signed }}
         working-directory: app
         env:
-          BUNDLES: ${{ matrix.bundles }}
+          BUNDLES: ${{ steps.packages.outputs.bundles }}
         run: |
           npm run tauri build -- --bundles "$BUNDLES" \
             --config '{"bundle":{"active":true}}' -- --locked
@@ -75,7 +80,7 @@ jobs:
         if: ${{ inputs.signed }}
         working-directory: app
         env:
-          BUNDLES: ${{ matrix.bundles }}
+          BUNDLES: ${{ steps.packages.outputs.bundles }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

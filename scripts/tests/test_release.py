@@ -5,11 +5,23 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("release", Path(__file__).parents[1] / "release.py")
 release = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = release
 SPEC.loader.exec_module(release)
+
+
+def load_script(name, filename):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[1] / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+collector = load_script("collect_candidate", "collect-candidate.py")
+verifier = load_script("verify_release", "verify-release.py")
 
 
 class ReleaseTests(unittest.TestCase):
@@ -47,6 +59,32 @@ class ReleaseTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     release.set_version(version, root)
             self.assertEqual(release.check_version(root=root), "0.1.0")
+
+    def test_collect_signed_windows_beta_without_msi(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            release.set_version("0.0.1-beta.1", root)
+            bundle = root / "app/src-tauri/target/release/bundle/nsis"
+            bundle.mkdir(parents=True)
+            for path in (bundle / "setup.exe", bundle / "setup.exe.sig", root / "LICENSE",
+                         root / "release-notices.txt"):
+                path.write_text("fixture")
+            output = collector.collect("windows-x64", root, signed=True)
+            self.assertEqual({path.name for path in output.iterdir()}, {
+                "setup.exe", "setup.exe.sig", "LICENSE", "THIRD-PARTY-NOTICES.txt", "SHA256SUMS",
+            })
+
+    def test_release_verification_requires_msi_only_for_stable(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(verifier.feed, "verify_artifact") as check:
+            root = Path(temp)
+            for asset in ("app.AppImage", "setup.exe"):
+                (root / asset).touch()
+                (root / f"{asset}.sig").write_text("signature")
+            verifier.verify(root, "0.0.1-beta.1", "public-key")
+            self.assertEqual([call.args[0].suffix for call in check.call_args_list], [".AppImage", ".exe"])
+            with self.assertRaisesRegex(ValueError, r"exactly one \.msi"):
+                verifier.verify(root, "0.0.1", "public-key")
 
     def test_archive_whitelist_and_executable_mode(self):
         with tempfile.TemporaryDirectory() as temp:

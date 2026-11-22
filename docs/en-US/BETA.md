@@ -1,6 +1,9 @@
 # Open testing and contributions
 
-The open beta invites the community to test the application and contribute final polish. Check [Releases](https://github.com/GustavoCarisRezende/racing-data-studio/releases) for available versions; this does not assume that installers have been published. Testing has focused on Linux; Windows and macOS still need validation.
+The open beta invites the community to test the application and report problems. In [Releases](https://github.com/GustavoCarisRezende/racing-data-studio/releases), open the beta pre-release when available and find the downloads under **Assets**.
+
+- **Windows x64** — download and run the `*-setup.exe` installer.
+- **Linux x64** — download the `.AppImage`, make it executable in the file properties or with `chmod +x`, and open it. The `.tar.gz` contains the same AppImage and instructions. See the [Linux guide](LINUX_TEST_BUILD.md).
 
 If there is no suitable file for your system, running from source requires development tools: clone `https://github.com/GustavoCarisRezende/racing-data-studio.git` with Git, enter `racing-data-studio`, and follow the [development prerequisites and commands](DEVELOPMENT.md#prerequisites-and-commands). No account is needed to use the application; a GitHub account is needed to open an issue. The browser preview does not replace the desktop application.
 
@@ -12,13 +15,15 @@ For complete instructions, examples and troubleshooting, see the [user guide](US
 2. Enter **Formula 1** and open **Manage synchronizations**. Choose a season and select **Import**; wait for completion. Internet access is required. If the catalog fails, the alternative year list does not guarantee availability at the source.
 3. In **Explore events**, choose a season and event to see available results. Future events or incomplete sources may have no results.
 4. In **Data Sandbox**, try filters, tables and charts. Templates save reusable configurations; CSV exports the complete table and SVG/PNG export charts. Check notices and provenance before interpreting results.
-5. In **Manage snapshots**, choose an active snapshot or restore an earlier one. Restoring an earlier snapshot creates a new active copy; activating only selects an existing one. Templates use active snapshots when opened; older analyses may depend on specific snapshots. Deleting a referenced snapshot can prevent reopening an analysis.
+5. In **Manage snapshots**, activate an existing snapshot or restore an earlier one as a new active copy. Sandbox templates use the active snapshots. Legacy analyses can be linked to specific snapshots. Before deleting a snapshot, the confirmation lists the linked analyses that will also be deleted if you proceed.
 
 A successful update creates and activates a new snapshot even when content is identical. Importing and updating require a network; exploring imported data is local. Points and cumulative values are exploratory, not official standings. Source data can be incomplete even when an import finishes successfully.
 
 ## Local data and reset
 
 Snapshots remain in the same local database and are not independent external copies. On Linux the database is normally at `~/.local/share/org.racingdatastudio.app/categories/f1.sqlite` or under `$XDG_DATA_HOME/org.racingdatastudio.app`. Per-event copies are supplemental and do not restore the database.
+
+In **Manage snapshots**, use **Create backup** to save an external ZIP copy of your Formula 1 seasons, snapshots, templates and analyses. **Restore backup** replaces the category's local database after confirmation. Keep the ZIP outside the app's data directory and check the data provider's terms before redistributing it.
 
 The menu's **Restore Default Settings** option asks for confirmation and restarts the application; it permanently deletes local data, snapshots, templates and preferences in the application's areas. Canceling deletes nothing. Exports elsewhere are not deleted. For technical details and development differences, see [usability and reset](DESKTOP_USABILITY.md).
 
