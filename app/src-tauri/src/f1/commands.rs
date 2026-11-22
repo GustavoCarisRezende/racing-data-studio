@@ -361,8 +361,14 @@ pub async fn f1_snapshots(app: tauri::AppHandle, year: u16) -> Result<Vec<Value>
 #[tauri::command]
 pub async fn f1_backup_database(app: tauri::AppHandle, restore: bool) -> Result<bool, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let backup_dir = app.path().document_dir().ok().filter(|path| path.is_dir())
+        .or_else(|| app.path().home_dir().ok().filter(|path| path.is_dir()));
     tauri::async_runtime::spawn_blocking(move || {
         let dialog = app.dialog().file();
+        let dialog = match backup_dir {
+            Some(directory) => dialog.set_directory(directory),
+            None => dialog,
+        };
         let selection = if restore {
             dialog.add_filter("Racing Data Studio", &["zip", "sqlite"]).blocking_pick_file()
         } else {

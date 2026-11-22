@@ -191,6 +191,8 @@ Offline checks fail without blocking local use or opening unsolicited dialogs.
 On pull requests, **Check desktop changes** builds the frontend and runs the
 JavaScript, Rust and Python suites on Linux and Windows. Candidate builds use the
 same validation action before packaging installers.
+On Windows, it also silently installs and uninstalls the generated EXE
+on the disposable runner.
 
 On Linux x64, the following test takes two increasing AppImage versions signed
 with the same disposable key. It verifies that a mismatched version is rejected,

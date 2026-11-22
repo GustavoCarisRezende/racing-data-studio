@@ -194,6 +194,8 @@ Falhas de rede não bloqueiam o uso local nem abrem diálogos espontâneos.
 O workflow **Check desktop changes** roda a compilação do frontend e as suítes
 JavaScript, Rust e Python em pull requests no Linux e no Windows. O workflow de
 candidatos usa a mesma ação de validação antes de empacotar os instaladores.
+No Windows, ele também executa uma instalação e desinstalação silenciosas
+do EXE gerado no runner descartável.
 
 No Linux x64, este teste usa dois AppImages de versões crescentes com a mesma
 chave de teste. Ele valida a rejeição de uma versão anunciada incorreta,

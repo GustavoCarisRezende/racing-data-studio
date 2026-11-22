@@ -98,6 +98,23 @@ jobs:
           else
             python -B scripts/collect-candidate.py --platform "$PLATFORM"
           fi
+      - name: Test clean NSIS installation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $setup = Get-ChildItem -Path artifacts -File -Filter '*-setup.exe'
+          $installDir = Join-Path $env:RUNNER_TEMP 'rds-install-test'
+          $installer = Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$installDir" -Wait -PassThru
+          $exe = Join-Path $installDir 'racing-data-studio.exe'
+          $uninstaller = Join-Path $installDir 'uninstall.exe'
+          if ($installer.ExitCode -ne 0 -or !(Test-Path $exe) -or !(Test-Path $uninstaller)) {
+            throw "NSIS installation failed with exit code $($installer.ExitCode)"
+          }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0 -or (Test-Path $exe)) {
+            throw "NSIS uninstallation failed with exit code $($uninstall.ExitCode)"
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: racing-data-studio-${{ matrix.platform }}
