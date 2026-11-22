@@ -63,6 +63,7 @@ if [[ "$platform" == linux-x64 ]]; then
     exit 1
   fi
   image="$PWD/${images[0]}"
+  env -u APPIMAGE_EXTRACT_AND_RUN "$image" --appimage-version > "$materials/APPIMAGE-RUNTIME.txt"
   (cd "$materials" && env -u APPIMAGE_EXTRACT_AND_RUN "$image" --appimage-extract >/dev/null)
   args+=(--app-dir "$materials/squashfs-root")
 fi

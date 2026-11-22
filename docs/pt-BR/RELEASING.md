@@ -104,8 +104,8 @@ fixo e a instalação e atualização do MSI seguem um fluxo manual separado.
 
 1. A partir de `app/`, gere o par de chaves em uma pasta privada fora do
    repositório com `npm run tauri signer generate -- -w "$HOME/.tauri/rds-updater.key"`.
-   Informe uma senha forte no prompt. Você pode gerar uma senha aleatória de
-   64 caracteres hexadecimais com `openssl rand -hex 32` em um terminal privado
+   Para proteger a chave com senha, informe uma senha forte no prompt. Você pode
+   gerar 64 caracteres hexadecimais com `openssl rand -hex 32` em um terminal privado
    ou usar um gerenciador de senhas. O Tauri gera as chaves e usa a senha para
    proteger a chave privada. Guarde a chave privada e a senha em local seguro
    para manter a compatibilidade com as instalações existentes.
@@ -113,8 +113,8 @@ fixo e a instalação e atualização do MSI seguem um fluxo manual separado.
    variável de repositório `TAURI_UPDATER_PUBLIC_KEY` com o conteúdo de
    `rds-updater.key.pub`.
 3. Em **Settings → Environments → release-signing**, crie os secrets
-   `TAURI_SIGNING_PRIVATE_KEY` (conteúdo completo de `rds-updater.key`) e
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (a senha usada na geração).
+   `TAURI_SIGNING_PRIVATE_KEY` (conteúdo completo de `rds-updater.key`) e,
+   se definiu uma senha, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` com essa senha.
 4. `prepare-updater.py` valida o formato da chave pública e gera
    `tauri.release.generated.json`, sem gravar a chave privada. O workflow assinado
    ativa `bundle.createUpdaterArtifacts` e `requireSignedVersion`.

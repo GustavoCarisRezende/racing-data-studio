@@ -121,8 +121,8 @@ def ubuntu_materials(directory, app_dir):
 
 def collect(directory, platform, app_dir=None):
     version = check_version()
+    common_notices = [ROOT / "LICENSE", ROOT / "docs/THIRD_PARTY_PACKAGING.md"]
     entries = [
-        ROOT / "LICENSE",
         directory / "JAVASCRIPT-NOTICES.txt",
         directory / "frontend.cdx.json",
         directory / "sandbox.cdx.json",
@@ -131,11 +131,14 @@ def collect(directory, platform, app_dir=None):
     if platform == "linux-x64":
         if app_dir is None or not app_dir.is_dir():
             raise ValueError("The extracted Linux AppImage payload is required")
+        entries.append(directory / "APPIMAGE-RUNTIME.txt")
         entries.extend(ubuntu_materials(directory, app_dir))
     destination = directory / f"racing-data-studio_{version}_{platform}-third-party.zip"
     with zipfile.ZipFile(destination, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file in common_notices:
+            archive.write(file, file.name)
         for file in entries:
-            archive.write(file, file.name if file == ROOT / "LICENSE" else file.relative_to(directory))
+            archive.write(file, file.relative_to(directory))
     return destination
 
 

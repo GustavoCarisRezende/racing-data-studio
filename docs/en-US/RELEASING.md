@@ -102,16 +102,16 @@ UpgradeCode and its installation and upgrades follow a separate manual process.
 
 1. From `app/`, generate the key pair in a private directory outside the
    repository with `npm run tauri signer generate -- -w "$HOME/.tauri/rds-updater.key"`.
-   Enter a strong password at the prompt. You can generate a random
-   64-character hexadecimal password with `openssl rand -hex 32` in a private
+   To protect the key with a password, enter one at the prompt. You can generate
+   a random 64-character password with `openssl rand -hex 32` in a private
    terminal or use a password manager. Tauri generates the keys and uses the
    password to protect the private key. Keep a safe copy of the private key and
    password to maintain compatibility with existing installations.
 2. Under **Settings → Secrets and variables → Actions → Variables**, create the
    repository variable `TAURI_UPDATER_PUBLIC_KEY` containing `rds-updater.key.pub`.
 3. Under **Settings → Environments → release-signing**, create the secrets
-   `TAURI_SIGNING_PRIVATE_KEY` (the full contents of `rds-updater.key`) and
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the password used during key generation).
+   `TAURI_SIGNING_PRIVATE_KEY` (the full contents of `rds-updater.key`) and,
+   if you set a password, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` with that password.
 4. `prepare-updater.py` validates the public-key format and generates
    `tauri.release.generated.json`; it writes no private key. The signed workflow
    enables `bundle.createUpdaterArtifacts` and `requireSignedVersion`.
