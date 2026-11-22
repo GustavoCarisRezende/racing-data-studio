@@ -131,9 +131,8 @@ https://raw.githubusercontent.com/GustavoCarisRezende/racing-data-studio/updates
 https://raw.githubusercontent.com/GustavoCarisRezende/racing-data-studio/updates/stable.json
 ```
 
-The remote branch and feeds have **not** been created by this implementation.
-Create the dedicated `updates` branch before running promotion, with no secrets
-and only public channel metadata (an initial README is enough). Do not use GitHub's
+The dedicated `updates` branch starts with a README. The promotion workflow
+creates or updates a channel manifest after the release is published. Do not use GitHub's
 `releases/latest` endpoint for beta discovery; it excludes pre-releases.
 No GitHub token belongs in a publicly distributed app.
 

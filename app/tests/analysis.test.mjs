@@ -1,14 +1,19 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { createServer, normalizePath } from 'vite';
 
 let server, createProvider, createStore, contracts;
+const loadSandboxPackage = (name) => {
+  const url = new URL(`../../packages/sandbox-${name}/dist/index.js`, import.meta.url);
+  return server.ssrLoadModule(`/@fs/${normalizePath(fileURLToPath(url))}`);
+};
 before(async () => {
   server = await createServer({ server: { middlewareMode: true, watch: null, ws: false }, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] } });
   ({ createF1AnalysisProvider: createProvider } = await server.ssrLoadModule('/src/categories/f1/analysis-provider.ts'));
   ({ createF1AnalysisStore: createStore } = await server.ssrLoadModule('/src/categories/f1/analysis-store.ts'));
-  contracts = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-contracts/dist/index.js', import.meta.url).pathname);
+  contracts = await loadSandboxPackage('contracts');
 });
 after(async () => { await server?.close(); });
 const entry = (round, session, driver, points) => ({ round, session, result: { Driver: { driverId: driver }, Constructor: { constructorId: 'team' }, points } });
@@ -272,7 +277,7 @@ test('presentation exposes only available views and keeps source names separate 
   ]);
   assert.deepEqual(descriptor.presentation.defaultFilters.find(f => f.fieldId === 'season').values, ['2025']);
   const selection = await provider.resolveSelection({ protocolVersion: 1, datasetId: descriptor.id, policy: 'latest', partitionIds: [] });
-  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const core = await loadSandboxPackage('core');
   const defaultQuery = core.buildQuery(descriptor, selection, descriptor.presentation.defaultVisualization, descriptor.presentation.defaultFilters, 'new-default');
   assert.equal(defaultQuery.unifyEvents, true);
   assert.deepEqual(defaultQuery.filters.find(filter => filter.fieldId === 'session'), { fieldId: 'session', op: 'in', values: ['results', 'sprint'] });
@@ -376,7 +381,7 @@ test('team grouping updates table data and pie input when selecting a different 
 });
 
 test('native default pie configuration produces exact source totals by team and season', async () => {
-  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const core = await loadSandboxPackage('core');
   const raw = JSON.parse(await readFile(new URL('./fixtures/f1-default-team-model.json', import.meta.url), 'utf8'));
   const a = entry('1', 'results', 'a', '3.25'); a.result.Constructor = { constructorId: 'alpha', name: 'Alpha' };
   const b = entry('1', 'sprint', 'b', '0.50'); b.result.Constructor = { constructorId: 'alpha', name: 'Alpha' };
@@ -428,7 +433,7 @@ test('v3 cumulative uses chronological sessions before round/session display cro
 });
 
 test('team grouping retains driver cumulative identity, changes teams without reset and rejects ambiguous assignments', async () => {
-  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const core = await loadSandboxPackage('core');
   const item = (round, session, driver, team, points) => { const r = entry(round, session, driver, points); r.result.Constructor = { constructorId: team, name: team }; return r; };
   const one = snapshot(2024, '1', [item('1', 'sprint', 'a', 'old', '2'), item('1', 'results', 'a', 'old', '5'), item('2', 'results', 'a', 'new', '3'), item('1', 'results', 'b', 'old', '4'), item('2', 'results', 'b', 'old', null)]);
   one.calendar = [{ round: '1', date: '2024-03-03', time: '15:00:00Z', sprintDate: '2024-03-02', sprintTime: '12:00:00Z' }, { round: '2', date: '2024-03-10', time: '15:00:00Z', sprintDate: null, sprintTime: null }];
@@ -641,7 +646,7 @@ test('line-chart provider preserves every driver and season at shared X/Y coordi
     [1, 'driver-b', 'Bruno Costa', '2025', '7'],
   ]);
 
-  const core = await server.ssrLoadModule('/@fs/' + new URL('../../packages/sandbox-core/dist/index.js', import.meta.url).pathname);
+  const core = await loadSandboxPackage('core');
   const chart = core.buildChartModel(descriptor, query, result, 'line', 'en-US', 'Shared coordinates');
   assert.deepEqual(chart.series.map(series => [series.label, series.dimensions, series.values]), [
     ['Ana Lima · 2024', { driver: 'driver-a', season: '2024' }, [0]],

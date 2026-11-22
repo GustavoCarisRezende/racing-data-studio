@@ -133,9 +133,9 @@ https://raw.githubusercontent.com/GustavoCarisRezende/racing-data-studio/updates
 https://raw.githubusercontent.com/GustavoCarisRezende/racing-data-studio/updates/stable.json
 ```
 
-A branch remota e os manifestos **não** foram criados por esta implementação.
-Criar a branch dedicada `updates` antes da promoção, sem secrets e somente com
-metadados públicos dos canais (um README inicial basta). Não usar `releases/latest`
+A branch dedicada `updates` começa com um README. O workflow de promoção
+cria ou atualiza o manifesto do canal após a publicação da versão.
+Não usar `releases/latest`
 para descobrir betas: esse endpoint exclui pre-releases.
 Não incluir token GitHub no aplicativo distribuído publicamente.
 
