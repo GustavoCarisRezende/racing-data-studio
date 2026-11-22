@@ -1,8 +1,8 @@
-# Build de teste Linux x64
+# Executar o AppImage no Linux x64
 
-Este pacote contém o AppImage da aplicação, não dados pessoais ou temporadas
-importadas. Transfira o AppImage ou extraia o `.tar.gz` na outra máquina.
-O build de teste não é uma release publicada e ainda não se atualiza sozinho.
+Abra o AppImage avulso ou extraia o `.tar.gz` para obter o mesmo aplicativo
+com as instruções e licenças. A verificação de atualizações funciona nos builds
+assinados que têm um canal de atualização configurado.
 
 ```sh
 chmod +x RacingDataStudio.AppImage

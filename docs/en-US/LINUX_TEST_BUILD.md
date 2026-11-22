@@ -1,8 +1,8 @@
-# Linux x64 test build
+# Run the AppImage on Linux x64
 
-This package contains the application AppImage, not personal data or imported
-seasons. Transfer the AppImage or extract the `.tar.gz` on the target machine.
-The test build is not a published release and does not update itself yet.
+Open the standalone AppImage or extract the `.tar.gz` to get the same
+application with instructions and licenses. Update checks work on signed
+builds with an update channel configured.
 
 ```sh
 chmod +x RacingDataStudio.AppImage
