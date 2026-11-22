@@ -94,12 +94,13 @@ class ReleaseTests(unittest.TestCase):
                 verifier.verify(root, "0.0.1", "public-key")
 
     def test_rust_materials_remove_machine_path_and_include_mpl_source(self):
-        root_reference = "file:///D:/runner/work/rds/app/src-tauri"
+        root_reference = "path+file:///D:/runner/work/rds/app/src-tauri"
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "rust.cdx.json").write_text(json.dumps({
                 "metadata": {"component": {"bom-ref": f"{root_reference}#racing-data-studio@0.0.1"}},
                 "dependencies": [{"ref": f"{root_reference}#racing-data-studio@0.0.1"}],
+                "externalReferences": [{"url": "file://."}],
             }))
             (root / "cargo-about.json").write_text(json.dumps({"licenses": [{
                 "id": "MPL-2.0",
@@ -115,6 +116,8 @@ class ReleaseTests(unittest.TestCase):
             document = json.loads(sbom.read_text())
             self.assertEqual(document["dependencies"][0]["ref"],
                              document["metadata"]["component"]["bom-ref"])
+            self.assertEqual(document["externalReferences"][0]["url"],
+                             f"{materials.REPOSITORY}/tree/v0.0.1/app/src-tauri")
 
     def test_archive_whitelist_and_executable_mode(self):
         with tempfile.TemporaryDirectory() as temp:

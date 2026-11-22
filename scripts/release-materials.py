@@ -15,6 +15,17 @@ from release import ROOT, check_version
 REPOSITORY = "https://github.com/GustavoCarisRezende/racing-data-studio"
 
 
+def public_cargo_references(value, source_url):
+    if isinstance(value, dict):
+        return {name: public_cargo_references(item, source_url) for name, item in value.items()}
+    if isinstance(value, list):
+        return [public_cargo_references(item, source_url) for item in value]
+    if isinstance(value, str) and value.startswith(("file:", "path+file:")):
+        _, separator, fragment = value.partition("#")
+        return f"{source_url}{separator}{fragment}"
+    return value
+
+
 def rust_materials(directory, version):
     report_path = directory / "cargo-about.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -33,13 +44,10 @@ def rust_materials(directory, version):
                 output.write(f"https://static.crates.io/crates/{name}/{name}-{crate_version}.crate\n")
 
     inventory = directory / "rust.cdx.json"
-    raw = inventory.read_text(encoding="utf-8")
-    root_reference = json.loads(raw)["metadata"]["component"]["bom-ref"].split("#", 1)[0]
-    if not root_reference.startswith("file://"):
-        raise ValueError("Expected a Cargo SBOM for the local application")
+    document = json.loads(inventory.read_text(encoding="utf-8"))
     source_url = f"{REPOSITORY}/tree/v{version}"
     inventory.write_text(
-        raw.replace(root_reference, f"{source_url}/app/src-tauri").replace('"file://."', f'"{source_url}"'),
+        json.dumps(public_cargo_references(document, f"{source_url}/app/src-tauri"), indent=2) + "\n",
         encoding="utf-8",
         newline="\n",
     )
