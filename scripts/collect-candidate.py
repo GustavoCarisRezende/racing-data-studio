@@ -15,13 +15,17 @@ from release import (
 )
 
 
-def collect(platform, root=ROOT, signed=False):
+def collect(platform, root=ROOT, signed=False, materials=None):
     version = check_version(root=root)
     bundle = root / "app/src-tauri/target/release/bundle"
     output = root / "artifacts"
     notices = root / "release-notices.txt"
     if not notices.is_file():
         raise ValueError("Generate release-notices.txt before collecting artifacts")
+    if materials is not None:
+        expected = f"racing-data-studio_{version}_{platform}-third-party.zip"
+        if materials.name != expected or not materials.is_file():
+            raise ValueError(f"Expected release materials archive {expected}")
     # Refuse stale or mixed artifacts instead of deleting existing user files.
     if output.exists() and any(output.iterdir()):
         raise ValueError("artifacts/ must be empty; move previous candidates elsewhere")
@@ -30,7 +34,7 @@ def collect(platform, root=ROOT, signed=False):
         images = list((bundle / "appimage").glob("*.AppImage"))
         if len(images) != 1:
             raise ValueError("Expected exactly one AppImage")
-        linux_archive(images[0], output, version, notices, root)
+        linux_archive(images[0], output, version, notices, root, materials)
         target = output / f"racing-data-studio_{version}_linux_x64.AppImage"
         shutil.copy2(images[0], target)
         target.chmod(0o755)
@@ -50,6 +54,8 @@ def collect(platform, root=ROOT, signed=False):
                 shutil.copy2(signature, output / (target.name + ".sig"))
     shutil.copy2(root / "LICENSE", output / "LICENSE")
     shutil.copy2(notices, output / "THIRD-PARTY-NOTICES.txt")
+    if materials is not None:
+        shutil.copy2(materials, output / materials.name)
     checksums(output)
     return output
 
@@ -58,8 +64,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("linux-x64", "windows-x64"), required=True)
     parser.add_argument("--signed", action="store_true")
+    parser.add_argument("--materials", type=Path)
     args = parser.parse_args()
     try:
-        print(collect(args.platform, signed=args.signed))
+        print(collect(args.platform, signed=args.signed, materials=args.materials))
     except (ValueError, OSError) as error:
         parser.exit(1, f"{error}\n")

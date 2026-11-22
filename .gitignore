@@ -25,4 +25,6 @@ app/src-tauri/target/
 /artifacts/
 /app/src-tauri/tauri.release.generated.json
 /release-notices.txt
+/.release-materials/
+/app/src-tauri/release-rust.json
 *.key

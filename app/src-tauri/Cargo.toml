@@ -3,6 +3,7 @@ name = "racing-data-studio"
 version = "0.0.1-beta.1"
 description = "Local-first motorsport data studio"
 authors = ["Racing Data Studio contributors"]
+license = "Apache-2.0"
 edition = "2021"
 
 [build-dependencies]

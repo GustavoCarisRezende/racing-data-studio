@@ -49,7 +49,7 @@ From the repository root, after installing the prerequisites in
 ```sh
 cd packages
 npm run build
-npm run notices --silent > ../release-notices.txt
+npm run notices --silent -- --desktop > ../release-notices.txt
 cd ../app
 npm run tauri build -- --bundles appimage --config '{"bundle":{"active":true}}' -- --locked
 cd ..
@@ -61,9 +61,17 @@ Apply the resource limits from the development guide when running native builds.
 Move an earlier candidate elsewhere rather than deleting unknown files.
 The collector only includes explicit artifact paths, notices, instructions, and
 LICENSE; it never archives the repository or application data directories.
-Generated notices currently cover the JavaScript packages, not a complete native
-dependency inventory. Complete the Rust/bundled-system-library license and SBOM
-review before public distribution.
+The workflow generates a `*-third-party.zip` for each platform. It contains
+JavaScript and Rust notices plus CycloneDX SBOMs for both npm projects and
+the Cargo target. On Linux, it also includes an inventory of AppImage files
+matched to Ubuntu packages, their notices, and links to their exact source
+package versions. The Linux `.tar.gz` includes that ZIP with the AppImage.
+
+Before publication, review `unmapped_payload_paths` and
+`packages_without_copyright_file` in `ubuntu-packages.json`. Verify the origin
+and terms of packaging components, including the AppImage runtime and Windows
+installer helpers, and confirm that corresponding source is accessible where
+required. Replace broken source links with a location serving the exact version.
 
 ## Versioning
 
@@ -109,9 +117,10 @@ UpgradeCode and its installation and upgrades follow a separate manual process.
    enables `bundle.createUpdaterArtifacts` and `requireSignedVersion`.
    Updater signatures do not replace Windows
    Authenticode signing or guarantee SmartScreen reputation.
-5. Configure required reviewers on GitHub environments `release-signing`, `release`, and
-   `update-channel`. Creating these names in YAML does not itself enforce approval.
-   Restrict workflow/tag changes and access to signing secrets to maintainers.
+5. The maintainer reviews deployments through **Review deployments** in the
+   GitHub environments `release-signing`, `release`, and `update-channel`.
+   Dispatch the signed draft from `main`. Promotion accepts `main` and version
+   tags. Restrict workflow, tag, and secret changes to maintainers.
 
 No workflow generates signing keys. Unsigned candidates are deliberately not
 updater-ready. Private keys must never be committed or sent to the application.

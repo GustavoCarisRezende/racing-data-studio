@@ -22,6 +22,7 @@ def load_script(name, filename):
 
 collector = load_script("collect_candidate", "collect-candidate.py")
 verifier = load_script("verify_release", "verify-release.py")
+materials = load_script("release_materials", "release-materials.py")
 
 
 class ReleaseTests(unittest.TestCase):
@@ -92,6 +93,29 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"exactly one \.msi"):
                 verifier.verify(root, "0.0.1", "public-key")
 
+    def test_rust_materials_remove_machine_path_and_include_mpl_source(self):
+        root_reference = "file:///D:/runner/work/rds/app/src-tauri"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "rust.cdx.json").write_text(json.dumps({
+                "metadata": {"component": {"bom-ref": f"{root_reference}#racing-data-studio@0.0.1"}},
+                "dependencies": [{"ref": f"{root_reference}#racing-data-studio@0.0.1"}],
+            }))
+            (root / "cargo-about.json").write_text(json.dumps({"licenses": [{
+                "id": "MPL-2.0",
+                "text": "fixture text",
+                "source_path": "/private/runner/fixture",
+                "used_by": [{"crate": {"name": "example-crate", "version": "1.2.3"}}],
+            }]}))
+            notices, sbom = materials.rust_materials(root, "0.0.1")
+            self.assertIn("https://static.crates.io/crates/example-crate/example-crate-1.2.3.crate",
+                          notices.read_text())
+            self.assertNotIn("/private/runner", notices.read_text())
+            self.assertNotIn(root_reference, sbom.read_text())
+            document = json.loads(sbom.read_text())
+            self.assertEqual(document["dependencies"][0]["ref"],
+                             document["metadata"]["component"]["bom-ref"])
+
     def test_archive_whitelist_and_executable_mode(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -109,12 +133,17 @@ class ReleaseTests(unittest.TestCase):
             image.write_bytes(header)
             notices = root / "notices.txt"
             notices.write_text("third-party notices")
+            bundle_materials = root / "linux-third-party.zip"
+            bundle_materials.write_bytes(b"materials fixture")
             archive = release.linux_archive(image, root / "out", "0.0.1-beta.1", notices, root)
             with tarfile.open(archive) as tar:
                 entries = tar.getmembers()
                 self.assertEqual(len(entries), 5)
                 self.assertEqual(entries[0].mode, 0o755)
                 self.assertFalse(any("sqlite" in entry.name for entry in entries))
+            archive = release.linux_archive(image, root / "out", "0.0.1-beta.1", notices, root, bundle_materials)
+            with tarfile.open(archive) as tar:
+                self.assertTrue(any(name.endswith("/linux-third-party.zip") for name in tar.getnames()))
             release.checksums(root / "out")
             self.assertIn(archive.name, (root / "out/SHA256SUMS").read_text())
             image.write_bytes(b"not an appimage")

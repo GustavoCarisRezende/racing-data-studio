@@ -67,7 +67,7 @@ jobs:
           echo "bundles=$bundles" >> "$GITHUB_OUTPUT"
       - name: Collect JavaScript license notices
         working-directory: packages
-        run: npm run notices --silent > ../release-notices.txt
+        run: npm run notices --silent -- --desktop > ../release-notices.txt
       - name: Build native packages
         if: ${{ !inputs.signed }}
         working-directory: app
@@ -88,16 +88,19 @@ jobs:
           python -B ../scripts/prepare-updater.py --output src-tauri/tauri.release.generated.json
           npm run tauri build -- --bundles "$BUNDLES" \
             --config src-tauri/tauri.release.generated.json -- --locked
+      - name: Generate platform license notices and inventories
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: bash scripts/release-materials.sh "$PLATFORM"
       - name: Collect candidate
         env:
           PLATFORM: ${{ matrix.platform }}
           SIGNED: ${{ inputs.signed }}
         run: |
-          if [[ "$SIGNED" == true ]]; then
-            python -B scripts/collect-candidate.py --platform "$PLATFORM" --signed
-          else
-            python -B scripts/collect-candidate.py --platform "$PLATFORM"
-          fi
+          version=$(python -B scripts/release.py check)
+          args=(--platform "$PLATFORM" --materials ".release-materials/racing-data-studio_${version}_${PLATFORM}-third-party.zip")
+          if [[ "$SIGNED" == true ]]; then args+=(--signed); fi
+          python -B scripts/collect-candidate.py "${args[@]}"
       - name: Test clean NSIS installation
         if: runner.os == 'Windows'
         shell: pwsh

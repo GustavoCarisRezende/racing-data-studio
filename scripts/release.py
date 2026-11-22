@@ -103,7 +103,7 @@ def set_version(version, root=ROOT):
     check_version(version, root)
 
 
-def linux_archive(appimage, output, version, notices, root=ROOT):
+def linux_archive(appimage, output, version, notices, root=ROOT, materials=None):
     """Package an AppImage, not a misleading supposedly portable raw ELF."""
     validate_version(version)
     appimage, output, notices = map(Path, (appimage, output, notices))
@@ -131,6 +131,8 @@ def linux_archive(appimage, output, version, notices, root=ROOT):
             tar.addfile(info, source)
         tar.add(root / "LICENSE", arcname=f"{name}/LICENSE", recursive=False)
         tar.add(notices, arcname=f"{name}/THIRD-PARTY-NOTICES.txt", recursive=False)
+        if materials is not None:
+            tar.add(materials, arcname=f"{name}/{materials.name}", recursive=False)
         tar.add(root / "docs/en-US/LINUX_TEST_BUILD.md", arcname=f"{name}/README.en-US.md", recursive=False)
         tar.add(root / "docs/pt-BR/LINUX_TEST_BUILD.md", arcname=f"{name}/README.pt-BR.md", recursive=False)
     return archive

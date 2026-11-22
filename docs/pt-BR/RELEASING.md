@@ -50,7 +50,7 @@ Na raiz do repositório, após instalar os pré-requisitos de
 ```sh
 cd packages
 npm run build
-npm run notices --silent > ../release-notices.txt
+npm run notices --silent -- --desktop > ../release-notices.txt
 cd ../app
 npm run tauri build -- --bundles appimage --config '{"bundle":{"active":true}}' -- --locked
 cd ..
@@ -62,9 +62,18 @@ Aplique os limites de recursos do guia de desenvolvimento às compilações nati
 Mova um candidato anterior para outro local, sem apagar arquivos desconhecidos.
 O coletor inclui somente caminhos explícitos dos arquivos, avisos, instruções e
 LICENSE; nunca compacta o repositório nem diretórios de dados do aplicativo.
-Os avisos gerados cobrem atualmente os pacotes JavaScript, não um inventário
-completo das dependências nativas. Concluir a revisão de licenças Rust/bibliotecas
-do sistema empacotadas e o SBOM antes da distribuição pública.
+O workflow gera um ZIP `*-third-party.zip` para cada plataforma. Ele inclui os
+avisos JavaScript e Rust e os SBOMs CycloneDX dos dois projetos npm e do alvo
+Cargo. No Linux, o ZIP inclui um inventário dos arquivos do AppImage associados
+a pacotes Ubuntu, seus avisos e links para as versões dos pacotes-fonte. Esse
+ZIP acompanha também o AppImage no `.tar.gz`.
+
+Antes de publicar, revise as entradas `unmapped_payload_paths` e
+`packages_without_copyright_file` em `ubuntu-packages.json`. Confirme a origem e
+os termos dos componentes do empacotador, incluindo o runtime AppImage, os
+arquivos auxiliares do instalador Windows e a disponibilidade do código-fonte
+correspondente onde exigido. Substitua links indisponíveis por uma fonte que
+ofereça a versão correspondente.
 
 ## Versionamento
 
@@ -111,9 +120,11 @@ fixo e a instalação e atualização do MSI seguem um fluxo manual separado.
    ativa `bundle.createUpdaterArtifacts` e `requireSignedVersion`.
    As assinaturas não substituem assinatura Authenticode do
    Windows nem garantem reputação no SmartScreen.
-5. Configure revisores obrigatórios nos ambientes GitHub `release-signing`, `release` e
-   `update-channel`. Declarar esses nomes no YAML não impõe aprovação por si só.
-   Restringir alterações de workflows/tags e acesso aos secrets aos mantenedores.
+5. Nos ambientes GitHub `release-signing`, `release` e `update-channel`, o
+   mantenedor revisa o deploy em **Review deployments**. O rascunho assinado
+   é disparado a partir de `main`. O fluxo de promoção aceita `main` e as
+   tags de versão. Restrinja alterações de workflows, tags e secrets aos
+   mantenedores.
 
 Nenhum workflow gera chaves. Candidatos sem assinatura não ficam prontos para o
 updater. Chaves privadas nunca devem ser commitadas nem enviadas ao aplicativo.
