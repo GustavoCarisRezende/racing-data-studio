@@ -158,7 +158,10 @@ Não incluir token GitHub no aplicativo distribuído publicamente.
 3. Testar instalação/atualização e publicar explicitamente o rascunho como
    pre-release para beta (o workflow nunca publica automaticamente).
 4. Executar **Promote published release to update channel** a partir da referência
-   da versão correspondente, escolhendo tag/canal. Baixa os arquivos publicados,
+   da versão correspondente, escolhendo tag/canal. Para `v0.0.1-beta.1`, use
+   `main` enquanto os manifestos da aplicação indicarem `0.0.1-beta.1`, pois o
+   workflow atualizado usa o Ubuntu 24.04 para instalar o Minisign.
+   O workflow baixa os arquivos publicados,
    confere metadados, verifica assinaturas com minisign e a chave confiável, confere
    a versão assinada, recusa versões não crescentes e envia somente o JSON completo.
    Promoções são serializadas. Uma versão estável também pode entrar em `beta`

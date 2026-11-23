@@ -153,7 +153,9 @@ No GitHub token belongs in a publicly distributed app.
 3. Test installation/update, then explicitly publish the draft as a pre-release
    for beta (the workflow never publishes it).
 4. Run **Promote published release to update channel** from the matching version
-   ref, selecting the tag/channel. It downloads published assets, checks metadata,
+   ref, selecting the tag/channel. For `v0.0.1-beta.1`, use `main` while the
+   application manifests still report `0.0.1-beta.1`. The updated workflow uses
+   Ubuntu 24.04 to install Minisign. It downloads published assets, checks metadata,
    verifies signatures using minisign and the trusted public key, verifies the
    signed version, rejects non-increasing versions, and pushes only the complete
    channel JSON. Promotions are serialized. A stable release may also be promoted
